@@ -424,6 +424,6 @@ elif st.session_state.active_mode == "Quiz":
         
         st.markdown(f"### ❓ {current_q['question']}")
         
-        for option in current_q['options']:
+      for option in current_q['options']:
         if option in st.session_state.hidden_options:
   
