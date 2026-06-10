@@ -239,7 +239,7 @@ with st.sidebar:
                 question_count = st.number_input("How many questions?", min_value=1, max_value=150, value=5, step=5)
             
             st.write("---")
-            input_mode = st.radio("Input Source Input:", ["Upload Files (PDF, PPTX, DOCX, TXT)", "Voice Lesson Record / Audio Note", "YouTube Video Link"])
+            input_mode = st.radio("Input Source:", ["Upload Files (PDF, PPTX, DOCX, TXT)", "Voice Lesson Record / Audio Note", "YouTube Video Link"])
             
             study_text = ""
             triggered_generation = False
@@ -368,7 +368,11 @@ elif st.session_state.active_mode == "Reviewer":
     st.markdown("### 🔍 Need a Video Explainer for This Lesson?")
     st.caption("Don't understand a concept? Use these quick shortcuts to find lessons matching your study guide path!")
     
-    clean_topic_query = urllib.parse.quote(selected_path.replace("/", " "))
+    try:
+        clean_topic_query = urllib.parse.quote(selected_path.replace("/", " "))
+    except NameError:
+        clean_topic_query = "study+lesson"
+        
     yt_search_url = f"https://www.youtube.com/results?search_query={clean_topic_query}+lesson+explanation"
     google_search_url = f"https://www.google.com/search?q={clean_topic_query}+educational+guide"
     
@@ -379,7 +383,7 @@ elif st.session_state.active_mode == "Reviewer":
         st.link_button("🌐 Search Articles on Google", google_search_url, use_container_width=True)
         
     st.write("---")
-    if st.button("🏠 Back to Home Screen", use_container_width=True):
+    if st.button("🏠 Back to Home Screen", key="back_home_rev", use_container_width=True):
         st.session_state.active_mode = "Welcome"
         st.rerun()
 
@@ -422,6 +426,4 @@ elif st.session_state.active_mode == "Quiz":
         
         for option in current_q['options']:
             if option in st.session_state.hidden_options:
-                continue 
-            if not st.session_state.answered:
-                if st.button(opt
+  
