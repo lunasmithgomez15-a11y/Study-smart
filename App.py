@@ -109,12 +109,12 @@ def get_youtube_transcript(video_id):
         st.error(f"⚠️ YouTube Extraction Failed! CC required. Error: {e}")
         return None
 
-def generate_questions_with_ai(study_material, api_key):
+def generate_questions_with_ai(study_material, api_key, num_questions):
     try:
         client = genai.Client(api_key=api_key)
         prompt = f"""
         You are a fun school teacher making a gamified quiz for a student.
-        Based on the following material, generate 5 high-quality multiple-choice questions.
+        Based on the following material, generate exactly {num_questions} high-quality multiple-choice questions.
         Provide exactly 3 options (A, B, C), a 'correct' field ('A', 'B', or 'C'),
         and a funny child-friendly vivid analogy 'explanation'.
         
@@ -137,7 +137,7 @@ def generate_questions_with_ai(study_material, api_key):
 # --- WEB APP FRONTEND ---
 
 st.title("🧠 BrainCrunch AI Studio")
-st.caption("Organize your subjects into custom folders and challenge your friends!")
+st.caption("Organize your subjects into custom folders, choose your test size, and challenge your friends!")
 
 # --- SIDEBAR CONTROL UNIT ---
 with st.sidebar:
@@ -148,6 +148,19 @@ with st.sidebar:
         
     st.write("---")
     st.header("🎮 Generator Dashboard")
+    
+    # 🌟 NEW FEATURE: QUESTION LENGTH SELECTOR 🌟
+    st.subheader("📏 Session Length")
+    question_count = st.number_input(
+        "How many questions do you want?", 
+        min_value=1, 
+        max_value=150, 
+        value=5, 
+        step=5,
+        help="Type or select any amount up to 150 questions!"
+    )
+    
+    st.write("---")
     mode = st.radio("Choose Input Type:", ["Upload Files (PDF, PPTX, DOCX, TXT)", "YouTube Video Link", "Enter Friend's Share Code"])
     
     # 1. THE FILE ENGINE
@@ -159,12 +172,12 @@ with st.sidebar:
             if not st.session_state.api_key:
                 st.error("Please provide your API key first!")
             else:
-                with st.spinner("AI parsing your study material vault... 🍳"):
+                with st.spinner(f"AI reading materials to create {question_count} levels... 🍳"):
                     combined_text = ""
                     for f in uploaded_files:
                         combined_text += extract_text_from_file(f) + "\n"
                     
-                    ai_questions = generate_questions_with_ai(combined_text, st.session_state.api_key)
+                    ai_questions = generate_questions_with_ai(combined_text, st.session_state.api_key, question_count)
                     if ai_questions:
                         st.session_state.questions = ai_questions
                         st.session_state.current_index = 0
@@ -183,19 +196,19 @@ with st.sidebar:
             if not st.session_state.api_key:
                 st.error("Please provide your API key first!")
             else:
-                with st.spinner("Analyzing video transcript strings... 🍿"):
+                with st.spinner(f"Analyzing video to bake {question_count} levels... 🍿"):
                     v_id = get_youtube_id(yt_url)
                     if v_id:
                         transcript_text = get_youtube_transcript(v_id)
                         if transcript_text:
-                            ai_questions = generate_questions_with_ai(transcript_text, st.session_state.api_key)
+                            ai_questions = generate_questions_with_ai(transcript_text, st.session_state.api_key, question_count)
                             if ai_questions:
                                 st.session_state.questions = ai_questions
                                 st.session_state.current_index = 0
                                 st.session_state.score = 0
                                 st.session_state.streak = 0
                                 st.session_state.answered = False
-                                st.sidebar.success("Video levels initialized!")
+                                st.sidebar.success(f"Video levels initialized with {len(ai_questions)} tasks!")
                                 st.rerun()
 
     # 3. SHARE CODE INJECTOR
@@ -263,7 +276,7 @@ with st.sidebar:
 
 # --- MAIN RUNTIME ARENA ---
 if not st.session_state.questions:
-    st.info("💡 **Welcome to BrainCrunch Studio!**\n\n1. Open the left control panel using the `>>` button.\n2. Paste your Gemini API key.\n3. Drop notes, PPTX slides, word files, or video links.\n4. Save your quiz tracks into **Subject Folders** to switch topics effortlessly!")
+    st.info("💡 **Welcome to BrainCrunch Studio!**\n\n1. Open the left control panel using the `>>` button.\n2. Paste your Gemini API key.\n3. **Choose your desired question count.**\n4. Drop notes, PPTX slides, word files, or video links to start!")
 else:
     idx = st.session_state.current_index
     if idx < len(st.session_state.questions):
