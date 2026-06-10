@@ -261,5 +261,265 @@ with st.sidebar:
                         with st.spinner("Transcribing lesson audio... 💬"):
                             try:
                                 client = genai.Client(api_key=st.session_state.api_key)
-                                audio_upload_res = client.files.upload(file
-                                
+                                audio_upload_res = client.files.upload(file=recorded_audio, mime_type=recorded_audio.type)
+                                tx_prompt = "Transcribe the following lecture audio track exactly, keeping all numbers and core concepts sharp."
+                                tx_response = client.models.generate_content(model="gemini-2.5-flash", contents=[audio_upload_res, tx_prompt])
+                                study_text = tx_response.text
+                                triggered_generation = True
+                            except Exception as audio_err:
+                                st.error(f"Audio processing failure checklist: {audio_err}")
+
+            elif input_mode == "YouTube Video Link":
+                yt_url = st.text_input("YouTube Video URL:")
+                if yt_url and st.button("🎬 Process Video Streams", use_container_width=True):
+                    with st.spinner("Analyzing transcript... 🍿"):
+                        v_id = get_youtube_id(yt_url)
+                        if v_id:
+                            extracted_yt = get_youtube_transcript(v_id)
+                            if extracted_yt:
+                                study_text = extracted_yt
+                                triggered_generation = True
+            
+            if triggered_generation and study_text:
+                if output_type == "Gamified Quiz Decks":
+                    ai_qs = generate_questions_with_ai(study_text, st.session_state.api_key, question_count, st.session_state.quiz_host_persona, st.session_state.app_language)
+                    if ai_qs:
+                        st.session_state.questions = ai_qs
+                        st.session_state.active_mode = "Quiz"
+                        st.session_state.current_index = 0
+                        st.session_state.score = 0
+                        st.session_state.correct_answers_count = 0
+                        st.session_state.streak = 0
+                        st.session_state.max_streak = 0
+                        st.session_state.answered = False
+                        st.session_state.lifeline_5050_used = False
+                        st.session_state.lifeline_hint_used = False
+                        st.session_state.hidden_options = []
+                        st.rerun()
+                else:
+                    ai_notes = generate_summary_with_ai(study_text, st.session_state.api_key, st.session_state.quiz_host_persona, st.session_state.app_language)
+                    if ai_notes:
+                        st.session_state.review_notes = ai_notes
+                        st.session_state.active_mode = "Reviewer"
+                        st.rerun()
+
+            st.write("---")
+            st.subheader("📁 Save to Binders")
+            path_input = st.text_input("Folder Path:", value="Q1 / Science / Biology")
+            if st.button("📂 File Current Data Into Path", use_container_width=True):
+                if st.session_state.active_mode == "Quiz" and st.session_state.questions:
+                    st.session_state.nested_folders[path_input] = {"type": "Quiz", "data": list(st.session_state.questions)}
+                    st.toast(f"Quiz saved to: {path_input}!")
+                    st.rerun()
+                elif st.session_state.active_mode == "Reviewer" and st.session_state.review_notes:
+                    st.session_state.nested_folders[path_input] = {"type": "Reviewer", "data": st.session_state.review_notes}
+                    st.toast(f"Summary Reviewer saved to: {path_input}!")
+                    st.rerun()
+        elif admin_pass:
+            st.error("Incorrect Password!")
+
+    # PLAYER / STUDENT BINDER DROPDOWN
+    st.write("---")
+    st.header("🗂️ Study Binders")
+    if st.session_state.nested_folders:
+        selected_path = st.selectbox("Choose a study track to open:", list(st.session_state.nested_folders.keys()))
+        if st.button("🎮 Load Selected Content", use_container_width=True):
+            saved_item = st.session_state.nested_folders[selected_path]
+            if saved_item["type"] == "Quiz":
+                st.session_state.questions = list(saved_item["data"])
+                st.session_state.active_mode = "Quiz"
+                st.session_state.current_index = 0
+                st.session_state.score = 0
+                st.session_state.correct_answers_count = 0
+                st.session_state.streak = 0
+                st.session_state.max_streak = 0
+                st.session_state.answered = False
+                st.session_state.lifeline_5050_used = False
+                st.session_state.lifeline_hint_used = False
+                st.session_state.hidden_options = []
+            else:
+                st.session_state.review_notes = saved_item["data"]
+                st.session_state.active_mode = "Reviewer"
+            st.rerun()
+            
+        exported_json = json.dumps(st.session_state.nested_folders)
+        st.download_button(
+            label="📥 Download Cabinet Backup",
+            data=exported_json,
+            file_name="cabinet_backup.json",
+            mime="application/json",
+            use_container_width=True
+        )
+    else:
+        st.caption("No custom subject tracks saved yet.")
+
+# --- MAIN RUNTIME ARENA ---
+
+if st.session_state.active_mode == "Welcome":
+    st.info("👋 **Welcome to the Game Arena!**\n\nOpen the left sidebar menu panel (`>>`) and select a subject folder from the **Study Binders** section to instantly start playing quizzes or reviewing core summary notes!")
+
+elif st.session_state.active_mode == "Reviewer":
+    st.markdown("## 📑 Smart Summary Reviewer Sheet")
+    st.write("---")
+    st.markdown(st.session_state.review_notes)
+    st.write("---")
+    
+    # EXTERNAL DIRECTIONAL HUBS FOR GENERAL REVIEW TRACKS
+    st.markdown("### 🔍 Need a Video Explainer for This Lesson?")
+    st.caption("Don't understand a concept? Use these quick shortcuts to find lessons matching your study guide path!")
+    
+    try:
+        clean_topic_query = urllib.parse.quote(selected_path.replace("/", " "))
+    except Exception:
+        clean_topic_query = "study+lesson"
+        
+    yt_search_url = f"https://www.youtube.com/results?search_query={clean_topic_query}+lesson+explanation"
+    google_search_url = f"https://www.google.com/search?q={clean_topic_query}+educational+guide"
+    
+    col_nav1, col_nav2 = st.columns(2)
+    with col_nav1:
+        st.link_button("📺 Search Lessons on YouTube", yt_search_url, use_container_width=True)
+    with col_nav2:
+        st.link_button("🌐 Search Articles on Google", google_search_url, use_container_width=True)
+        
+    st.write("---")
+    if st.button("🏠 Back to Home Screen", key="back_home_rev", use_container_width=True):
+        st.session_state.active_mode = "Welcome"
+        st.rerun()
+
+elif st.session_state.active_mode == "Quiz":
+    idx = st.session_state.current_index
+    if idx < len(st.session_state.questions):
+        current_q = st.session_state.questions[idx]
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.markdown(f"<h4 style='text-align:center;color:#ffaa00;'>🏆 Score</h4><p style='text-align:center;font-size:24px;font-weight:bold;'>{st.session_state.score}</p>", unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"<h4 style='text-align:center;color:#ff5555;'>🔥 Streak</h4><p style='text-align:center;font-size:24px;font-weight:bold;'>{st.session_state.streak}</p>", unsafe_allow_html=True)
+        with col3:
+            st.markdown(f"<h4 style='text-align:center;color:#55afb5;'>🎯 Stage</h4><p style='text-align:center;font-size:24px;font-weight:bold;'>{idx + 1} / {len(st.session_state.questions)}</p>", unsafe_allow_html=True)
+            
+        st.progress((idx) / len(st.session_state.questions))
+        st.write("---")
+        
+        # STUDENT LIFELINES HUB
+        if not st.session_state.answered:
+            st.markdown("##### 🆘 Student Lifelines")
+            col_life1, col_life2 = st.columns(2)
+            with col_life1:
+                if st.button("⚖️ Use 50/50", key=f"life_50_{idx}", disabled=st.session_state.lifeline_5050_used, use_container_width=True):
+                    st.session_state.lifeline_5050_used = True
+                    wrong_choices = [opt for opt in current_q['options'] if opt[0] != current_q['correct']]
+                    if wrong_choices:
+                        st.session_state.hidden_options = [random.choice(wrong_choices)]
+                    st.rerun()
+            with col_life2:
+                if st.button("💡 Ask AI Guide Clue", key=f"life_hint_{idx}", disabled=st.session_state.lifeline_hint_used, use_container_width=True):
+                    st.session_state.lifeline_hint_used = True
+                    st.session_state.show_hint_text = True
+            if "show_hint_text" in st.session_state and st.session_state.show_hint_text:
+                st.caption(f"🤖 *AI Companion Clue:* Look carefully at matching rules and definitions!")
+            st.write("---")
+        
+        st.markdown(f"### ❓ {current_q['question']}")
+        
+        for option in current_q['options']:
+            if option in st.session_state.hidden_options:
+  continue 
+            if not st.session_state.answered:
+                if st.button(option, key=f"btn_{idx}_{option}", use_container_width=True):
+                    st.session_state.answered = True
+                    st.session_state.selected_option = option
+                    user_letter = option[0]
+                    if user_letter == current_q["correct"]:
+                        play_sfx(CORRECT_SFX)
+                    else:
+                        play_sfx(WRONG_SFX)
+                    st.rerun()
+                    
+        if st.session_state.answered:
+            user_letter = st.session_state.selected_option[0]
+            correct_letter = current_q["correct"]
+            
+            if user_letter == correct_letter:
+                st.markdown(f"<div style='background-color:#d4edda; color:#155724; border-radius:10px; padding:15px; border-left:6px solid #28a745; margin-bottom:15px;'><h4 style='margin:0;'>🎉 EXCELLENT HIT! / TAMA!</h4><p style='margin:5px 0 0 0;'>You chose: <b>{st.session_state.selected_option}</b></p></div>", unsafe_allow_html=True)
+                if f"scored_{idx}" not in st.session_state:
+                    st.session_state.score += 10 + (st.session_state.streak * 2)
+                    st.session_state.streak += 1
+                    st.session_state.correct_answers_count += 1
+                    if st.session_state.streak > st.session_state.max_streak:
+                        st.session_state.max_streak = st.session_state.streak
+                    st.session_state[f"scored_{idx}"] = True
+            else:
+                st.markdown(f"<div style='background-color:#f8d7da; color:#721c24; border-radius:10px; padding:15px; border-left:6px solid #dc3545; margin-bottom:15px;'><h4 style='margin:0;'>💔 DEFLECTED / MALI</h4><p style='margin:5px 0 0 0;'>You chose <b>{user_letter}</b>. Correct path: <b>{correct_letter}</b>.</p></div>", unsafe_allow_html=True)
+                st.session_state.streak = 0
+                
+            st.markdown(f"**🧠 Memory Scoop ({st.session_state.quiz_host_persona}):**")
+            st.write(current_q['explanation'])
+            
+            # --- DYNAMIC EXTERNAL REDIRECTION HUD PER QUESTION ---
+            st.write("")
+            st.markdown("#### 📺 Confused About This Question?")
+            st.caption("Launch a target vector query into search spaces to view instant mini-lectures on this topic:")
+            
+            query_keywords = re.sub(r'[^\w\s]', '', current_q['question'])
+            encoded_query = urllib.parse.quote(query_keywords)
+            
+            question_yt_url = f"https://www.youtube.com/results?search_query={encoded_query}"
+            question_google_url = f"https://www.google.com/search?q={encoded_query}"
+            
+            col_qnav1, col_qnav2 = st.columns(2)
+            with col_qnav1:
+                st.link_button("📺 Watch Video Explainers", question_yt_url, use_container_width=True)
+            with col_qnav2:
+                st.link_button("🌐 Google Text Breakdowns", question_google_url, use_container_width=True)
+            
+            st.write("---")
+            if st.button("➡️ Advance to Next Level", use_container_width=True):
+                st.session_state.current_index += 1
+                st.session_state.answered = False
+                st.session_state.selected_option = None
+                st.session_state.hidden_options = []
+                if "show_hint_text" in st.session_state:
+                    del st.session_state.show_hint_text
+                st.rerun()
+    else:
+        st.success("🏆 **CAMP RUN COMPLETED!** 🏆")
+        st.subheader("📊 Performance Scorecard")
+        
+        total_qs = len(st.session_state.questions)
+        accuracy_pct = int((st.session_state.correct_answers_count / total_qs) * 100) if total_qs > 0 else 0
+        
+        col_an1, col_an2, col_an3 = st.columns(3)
+        with col_an1:
+            st.metric(label="🎖️ Score", value=f"{st.session_state.score} pts")
+        with col_an2:
+            st.metric(label="🎯 Accuracy", value=f"{accuracy_pct}%")
+        with col_an3:
+            st.metric(label="🔥 Max Streak", value=f"{st.session_state.max_streak}")
+            
+        player_name = st.text_input("Enter name for scoreboard matrix:", value="Player 1")
+        if st.button("💾 Log Score", use_container_width=True):
+            st.session_state.leaderboard.append({"name": player_name, "score": st.session_state.score, "accuracy": accuracy_pct})
+            st.toast("Score logged into local system matrix!")
+            st.rerun()
+            
+        if st.session_state.leaderboard:
+            st.write("### 🏁 Current Rankings")
+            sorted_board = sorted(st.session_state.leaderboard, key=lambda x: x['score'], reverse=True)
+            for place, entry in enumerate(sorted_board, 1):
+                st.write(f"**#{place}** {entry['name']} — `{entry['score']} pts` ({entry.get('accuracy', 0)}% Accuracy)")
+        
+        if st.button("🔄 Replay Session", use_container_width=True):
+            st.session_state.current_index = 0
+            st.session_state.score = 0
+            st.session_state.correct_answers_count = 0
+            st.session_state.streak = 0
+            st.session_state.max_streak = 0
+            st.session_state.answered = False
+            st.session_state.selected_option = None
+            st.session_state.lifeline_5050_used = False
+            st.session_state.lifeline_hint_used = False
+            st.session_state.hidden_options = []
+            st.rerun()
