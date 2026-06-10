@@ -3,6 +3,7 @@ import re
 import random
 import base64
 import io
+import os
 import urllib.parse
 import streamlit as st
 from pypdf import PdfReader
@@ -23,6 +24,27 @@ try:
 except ImportError:
     docx = None
     Document = None
+
+# --- LOCAL STORAGE FILE PATH ---
+STORAGE_FILE = "storage.json"
+
+def load_local_storage():
+    """Loads saved quizzes and notes from the hard drive."""
+    if os.path.exists(STORAGE_FILE):
+        try:
+            with open(STORAGE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def save_local_storage(data):
+    """Saves binders permanently to the hard drive for offline access."""
+    try:
+        with open(STORAGE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+    except Exception as e:
+        st.error(f"Failed to write to local storage: {e}")
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -63,12 +85,14 @@ if "max_streak" not in st.session_state:
     st.session_state.max_streak = 0
 if "leaderboard" not in st.session_state:
     st.session_state.leaderboard = []
-if "nested_folders" not in st.session_state:
-    st.session_state.nested_folders = {} 
 if "quiz_host_persona" not in st.session_state:
     st.session_state.quiz_host_persona = "Enthusiastic School Teacher"
 if "app_language" not in st.session_state:
     st.session_state.app_language = "English"
+
+# Initialize binders directly from local hard drive storage file
+if "nested_folders" not in st.session_state:
+    st.session_state.nested_folders = load_local_storage()
 
 # Student Lifeline Tracking Configurations
 if "lifeline_5050_used" not in st.session_state:
@@ -155,8 +179,12 @@ def build_docx_bytes(markdown_text):
     doc.save(bio)
     return bio.getvalue()
 
-# --- DEEP AI CORE ENGINES (PRO -> FLASH FALLBACK) ---
+# --- DEEP AI CORE ENGINES (PRO -> FLASH FALLBACK WITH OVERLOAD PROTECTION) ---
 def generate_questions_with_ai(study_material, api_key, num_questions, persona, language):
+    if not api_key:
+        st.error("🛑 Offline/Configuration Limit: Generating new questions requires an internet connection and an API key.")
+        return None
+
     lang_instruction = "All outputs must be written entirely in English."
     if language == "Tagalog / Filipino":
         lang_instruction = "CRITICAL: You are teaching a Filipino/Tagalog class. All questions, options, and explanations MUST be written in clear, natural Tagalog."
@@ -173,7 +201,7 @@ def generate_questions_with_ai(study_material, api_key, num_questions, persona, 
     {study_material}
     """
     
-    for target_model in ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-1.5-flash']:
+    for target_model in ['gemini-2.5-flash', 'gemini-2.5-pro']:
         try:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
@@ -186,12 +214,19 @@ def generate_questions_with_ai(study_material, api_key, num_questions, persona, 
             )
             return json.loads(response.text)
         except Exception as e:
-            if any(err in str(e) for err in ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED"]):
+            if any(err in str(e).upper() for err in ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "LIMIT"]):
                 continue
             st.error(f"🛑 AI System Error: {e}")
             return None
+    
+    st.error("⏳ All available AI models are currently busy or rate-limited. Please wait a moment and try clicking process again.")
+    return None
 
 def generate_summary_with_ai(study_material, api_key, persona, language):
+    if not api_key:
+        st.error("🛑 Offline/Configuration Limit: Generating new notes requires an internet connection and an API key.")
+        return None
+
     lang_instruction = "Write the summary sheet in English."
     if language == "Tagalog / Filipino":
         lang_instruction = "CRITICAL: Write the entire summary sheet in fluent Tagalog/Filipino language."
@@ -210,7 +245,7 @@ def generate_summary_with_ai(study_material, api_key, persona, language):
     {study_material}
     """
     
-    for target_model in ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-1.5-flash']:
+    for target_model in ['gemini-2.5-flash', 'gemini-2.5-pro']:
         try:
             client = genai.Client(api_key=api_key)
             response = client.models.generate_content(
@@ -219,10 +254,13 @@ def generate_summary_with_ai(study_material, api_key, persona, language):
             )
             return response.text
         except Exception as e:
-            if any(err in str(e) for err in ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED"]):
+            if any(err in str(e).upper() for err in ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "LIMIT"]):
                 continue
             st.error(f"🛑 AI Summary Error: {e}")
             return None
+            
+    st.error("⏳ All available AI models are currently busy or rate-limited. Please wait a moment and try clicking process again.")
+    return None
 
 # --- APP FRONTEND ---
 st.markdown("<h1 style='text-align: center;'>🧠 BrainCrunch Studio Pro</h1>", unsafe_allow_html=True)
@@ -240,6 +278,8 @@ with st.sidebar:
             st.success("Access Verified! 🛠️")
             
             st.markdown("### 🤫 Secret Admin Feature Hub")
+            st.session_state.api_key = st.text_input("System Gemini API Key:", value=st.session_state.api_key, type="password")
+            
             st.subheader("🧙‍♂️ Game Host Persona")
             st.session_state.quiz_host_persona = st.selectbox(
                 "Choose AI Game Master:",
@@ -250,15 +290,12 @@ with st.sidebar:
 
     st.write("---")
     st.header("🎮 Student Core Features")
-    
-    if not st.session_state.api_key:
-        st.session_state.api_key = st.text_input("Enter Gemini API Key to activate generation:", type="password")
         
     st.subheader("🌐 Language Filter")
     st.session_state.app_language = st.selectbox("Select Study Language:", ["English", "Tagalog / Filipino"])
         
     st.write("---")
-    st.subheader("🧙‍♂️ AI Content Engine")
+    st.subheader("🧙‍♂️ AI Content Engine (Requires Internet)")
     output_type = st.radio("What should the AI build?", ["Gamified Quiz Decks", "Clean Review Summaries"])
     
     if output_type == "Gamified Quiz Decks":
@@ -281,19 +318,16 @@ with st.sidebar:
     elif input_mode == "Voice Lesson Record / Audio Note":
         recorded_audio = st.file_uploader("Upload audio lesson clip:", type=["mp3", "wav", "m4a", "ogg"])
         if recorded_audio and st.button("🎙️ Process Lesson Audio Track", use_container_width=True):
-            if not st.session_state.api_key:
-                st.error("API Key required for audio extraction transcript tasks.")
-            else:
-                with st.spinner("Transcribing lesson audio... 💬"):
-                    try:
-                        client = genai.Client(api_key=st.session_state.api_key)
-                        audio_upload_res = client.files.upload(file=recorded_audio, mime_type=recorded_audio.type)
-                        tx_prompt = "Transcribe the following lecture audio track exactly, keeping all numbers and core concepts sharp."
-                        tx_response = client.models.generate_content(model="gemini-2.5-flash", contents=[audio_upload_res, tx_prompt])
-                        study_text = tx_response.text
-                        triggered_generation = True
-                    except Exception as audio_err:
-                        st.error(f"Audio processing failure checklist: {audio_err}")
+            with st.spinner("Transcribing lesson audio... 💬"):
+                try:
+                    client = genai.Client(api_key=st.session_state.api_key)
+                    audio_upload_res = client.files.upload(file=recorded_audio, mime_type=recorded_audio.type)
+                    tx_prompt = "Transcribe the following lecture audio track exactly, keeping all numbers and core concepts sharp."
+                    tx_response = client.models.generate_content(model="gemini-2.5-flash", contents=[audio_upload_res, tx_prompt])
+                    study_text = tx_response.text
+                    triggered_generation = True
+                except Exception as audio_err:
+                    st.error(f"Audio processing failure checklist: {audio_err}")
 
     elif input_mode == "YouTube Video Link":
         yt_url = st.text_input("YouTube Video URL:")
@@ -330,21 +364,23 @@ with st.sidebar:
                 st.rerun()
 
     st.write("---")
-    st.subheader("📁 Save to Binders")
+    st.subheader("📁 Save to Binders (Works Offline)")
     path_input = st.text_input("Folder Path:", value="Q1 / Science / Biology")
     if st.button("📂 File Current Data Into Path", use_container_width=True):
         if st.session_state.active_mode == "Quiz" and st.session_state.questions:
             st.session_state.nested_folders[path_input] = {"type": "Quiz", "data": list(st.session_state.questions)}
-            st.toast(f"Quiz saved to: {path_input}!")
+            save_local_storage(st.session_state.nested_folders)
+            st.toast(f"Quiz saved to hard drive under: {path_input}!")
             st.rerun()
         elif st.session_state.active_mode == "Reviewer" and st.session_state.review_notes:
             st.session_state.nested_folders[path_input] = {"type": "Reviewer", "data": st.session_state.review_notes}
-            st.toast(f"Summary Reviewer saved to: {path_input}!")
+            save_local_storage(st.session_state.nested_folders)
+            st.toast(f"Summary Reviewer saved to hard drive under: {path_input}!")
             st.rerun()
 
     # STUDENT BINDER DROPDOWN
     st.write("---")
-    st.header("🗂️ Study Binders")
+    st.header("🗂️ Study Binders (Works Offline)")
     if st.session_state.nested_folders:
         selected_path = st.selectbox("Choose a study track to open:", list(st.session_state.nested_folders.keys()))
         if st.button("🎮 Load Selected Content", use_container_width=True):
@@ -405,12 +441,11 @@ elif st.session_state.active_mode == "Reviewer":
                 mime="text/plain",
                 use_container_width=True
             )
-        st.caption("💡 *Pro-Tip:* Once downloaded, you can directly drag and drop this file into your **Google Drive** folder or upload it straight into **Google Docs**!")
 
     st.write("---")
     
     # EXTERNAL DIRECTIONAL HUBS
-    st.markdown("### 🔍 Need a Video Explainer for This Lesson?")
+    st.markdown("### 🔍 Need a Video Explainer for This Lesson? (Requires Internet)")
     try:
         clean_topic_query = urllib.parse.quote(selected_path.replace("/", " "))
     except Exception:
@@ -474,11 +509,6 @@ elif st.session_state.active_mode == "Quiz":
                 if st.button(option, key=f"btn_{idx}_{option}", use_container_width=True):
                     st.session_state.answered = True
                     st.session_state.selected_option = option
-                    user_letter = option[0]
-                    if user_letter == current_q["correct"]:
-                        play_sfx(CORRECT_SFX)
-                    else:
-                        play_sfx(WRONG_SFX)
                     st.rerun()
                     
         if st.session_state.answered:
@@ -503,7 +533,7 @@ elif st.session_state.active_mode == "Quiz":
             
             # DYNAMIC REDIRECTION HUD
             st.write("")
-            st.markdown("#### 📺 Confused About This Question?")
+            st.markdown("#### 📺 Confused About This Question? (Requires Internet)")
             query_keywords = re.sub(r'[^\w\s]', '', current_q['question'])
             encoded_query = urllib.parse.quote(query_keywords)
             
