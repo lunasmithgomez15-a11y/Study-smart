@@ -2,6 +2,7 @@ import json
 import re
 import random
 import base64
+import io
 import urllib.parse
 import streamlit as st
 from pypdf import PdfReader
@@ -18,8 +19,10 @@ except ImportError:
 
 try:
     import docx
+    from docx import Document
 except ImportError:
     docx = None
+    Document = None
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -128,68 +131,99 @@ def get_youtube_transcript(video_id):
     except Exception:
         return None
 
-# --- UPGRADED DEEP AI CORE ENGINES ---
-def generate_questions_with_ai(study_material, api_key, num_questions, persona, language):
-    try:
-        client = genai.Client(api_key=api_key)
-        
-        lang_instruction = "All outputs must be written entirely in English."
-        if language == "Tagalog / Filipino":
-            lang_instruction = "CRITICAL: You are teaching a Filipino/Tagalog class. All questions, options, and explanations MUST be written in clear, natural Tagalog."
-
-        prompt = f"""
-        You are a smart game host playing with a student. Use this personality profile: "{persona}".
-        {lang_instruction}
-        
-        TASK: Parse the provided text material thoroughly. Perform maximum deep information extraction—do not skip technical details, math variables, or niche terms. Create exactly {num_questions} high-quality multiple-choice questions.
-        
-        MATH RULE: If the question or options involve complex formulas, chemical equations, or mathematical expressions, format them cleanly using standard LaTeX notation (wrap with single '$' for inline math or double '$$' for large block equations) so they render beautifully on screen.
-        
-        Study Material:
-        {study_material}
-        """
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=list[QuizQuestion],
-            ),
-        )
-        return json.loads(response.text)
-    except Exception as e:
-        st.error(f"🛑 AI System Error: {e}")
+# --- DOCX CONVERTER ENGINE ---
+def build_docx_bytes(markdown_text):
+    if not Document:
         return None
+    doc = Document()
+    doc.add_heading("BrainCrunch Study Reviewer Sheet", level=1)
+    
+    # Strip basic structural markup patterns for a clean word file layout
+    clean_lines = markdown_text.split("\n")
+    for line in clean_lines:
+        if line.startswith("## "):
+            doc.add_heading(line.replace("## ", ""), level=2)
+        elif line.startswith("### "):
+            doc.add_heading(line.replace("### ", ""), level=3)
+        elif line.startswith("- ") or line.startswith("* "):
+            clean_bullet = line.replace("- ", "").replace("* ", "")
+            doc.add_paragraph(clean_bullet, style="List Bullet")
+        else:
+            if line.strip():
+                doc.add_paragraph(line)
+                
+    bio = io.BytesIO()
+    doc.save(bio)
+    return bio.getvalue()
+
+# --- DEEP AI CORE ENGINES (PRO -> FLASH FALLBACK) ---
+def generate_questions_with_ai(study_material, api_key, num_questions, persona, language):
+    lang_instruction = "All outputs must be written entirely in English."
+    if language == "Tagalog / Filipino":
+        lang_instruction = "CRITICAL: You are teaching a Filipino/Tagalog class. All questions, options, and explanations MUST be written in clear, natural Tagalog."
+
+    prompt = f"""
+    You are a smart game host playing with a student. Use this personality profile: "{persona}".
+    {lang_instruction}
+    
+    TASK: Parse the provided text material thoroughly. Perform maximum deep information extraction—do not skip technical details, math variables, or niche terms. Create exactly {num_questions} high-quality multiple-choice questions.
+    
+    MATH RULE: If the question or options involve complex formulas, chemical equations, or mathematical expressions, format them cleanly using standard LaTeX notation (wrap with single '$' for inline math or double '$$' for large block equations) so they render beautifully on screen.
+    
+    Study Material:
+    {study_material}
+    """
+    
+    for target_model in ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-1.5-flash']:
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=target_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=list[QuizQuestion],
+                ),
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            if any(err in str(e) for err in ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED"]):
+                continue
+            st.error(f"🛑 AI System Error: {e}")
+            return None
 
 def generate_summary_with_ai(study_material, api_key, persona, language):
-    try:
-        client = genai.Client(api_key=api_key)
-        
-        lang_instruction = "Write the summary sheet in English."
-        if language == "Tagalog / Filipino":
-            lang_instruction = "CRITICAL: Write the entire summary sheet in fluent Tagalog/Filipino language."
+    lang_instruction = "Write the summary sheet in English."
+    if language == "Tagalog / Filipino":
+        lang_instruction = "CRITICAL: Write the entire summary sheet in fluent Tagalog/Filipino language."
 
-        prompt = f"""
-        You are an expert academic tutor with this personality profile: "{persona}".
-        {lang_instruction}
-        
-        TASK: Read the uploaded file text and perform an exhaustive deep information extraction. Pull out all definitions, key historical dates, core concepts, formulas, and laws. 
-        
-        FORMAT RULES:
-        - Organize using neat Markdown bullet points and bold headers.
-        - For mathematical formulas, equations, matrices, or variable fractions, use beautiful, readable standard LaTeX tags ($...$ or $$...$$). Make numbers and step-by-step math breakdowns perfectly organized.
-        
-        Study Material:
-        {study_material}
-        """
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt
-        )
-        return response.text
-    except Exception as e:
-        st.error(f"🛑 AI Summary Error: {e}")
-        return None
+    prompt = f"""
+    You are an expert academic tutor with this personality profile: "{persona}".
+    {lang_instruction}
+    
+    TASK: Read the uploaded file text and perform an exhaustive deep information extraction. Pull out all definitions, key historical dates, core concepts, formulas, and laws. 
+    
+    FORMAT RULES:
+    - Organize using neat Markdown bullet points and bold headers.
+    - For mathematical formulas, equations, matrices, or variable fractions, use beautiful, readable standard LaTeX tags ($...$ or $$...$$). Make numbers and step-by-step math breakdowns perfectly organized.
+    
+    Study Material:
+    {study_material}
+    """
+    
+    for target_model in ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-1.5-flash']:
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=target_model,
+                contents=prompt
+            )
+            return response.text
+        except Exception as e:
+            if any(err in str(e) for err in ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED"]):
+                continue
+            st.error(f"🛑 AI Summary Error: {e}")
+            return None
 
 # --- APP FRONTEND ---
 st.markdown("<h1 style='text-align: center;'>🧠 BrainCrunch Studio Pro</h1>", unsafe_allow_html=True)
@@ -364,6 +398,38 @@ elif st.session_state.active_mode == "Reviewer":
     st.markdown(st.session_state.review_notes)
     st.write("---")
     
+    # NEW EXPORT HUB INTERFACE
+    st.markdown("### 📤 Student Export Hub")
+    st.caption("Copy this summary sheet directly to your computer clipboard or extract it into your word processing documents!")
+    
+    col_exp1, col_exp2 = st.columns(2)
+    with col_exp1:
+        # Streamlit Built-in Copy Area Widget Container
+        st.text_area("📋 Copy to Clipboard Panel (Select All -> Copy):", value=st.session_state.review_notes, height=80)
+        
+    with col_exp2:
+        if Document:
+            docx_data = build_docx_bytes(st.session_state.review_notes)
+            st.download_button(
+                label="📄 Export to Word File (.docx)",
+                data=docx_data,
+                file_name="BrainCrunch_Study_Sheet.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True
+            )
+        else:
+            # Fallback to Text layout if python-docx is compiling away
+            st.download_button(
+                label="📝 Export to Plain Text (.txt)",
+                data=st.session_state.review_notes,
+                file_name="BrainCrunch_Study_Sheet.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+        st.caption("💡 *Pro-Tip:* Once downloaded, you can directly drag and drop this file into your **Google Drive** folder or upload it straight into **Google Docs**!")
+
+    st.write("---")
+    
     # EXTERNAL DIRECTIONAL HUBS FOR GENERAL REVIEW TRACKS
     st.markdown("### 🔍 Need a Video Explainer for This Lesson?")
     st.caption("Don't understand a concept? Use these quick shortcuts to find lessons matching your study guide path!")
@@ -441,7 +507,7 @@ elif st.session_state.active_mode == "Quiz":
         if st.session_state.answered:
             user_letter = st.session_state.selected_option[0]
             correct_letter = current_q["correct"]
-         
+            
             if user_letter == correct_letter:
                 st.markdown(f"<div style='background-color:#d4edda; color:#155724; border-radius:10px; padding:15px; border-left:6px solid #28a745; margin-bottom:15px;'><h4 style='margin:0;'>🎉 EXCELLENT HIT! / TAMA!</h4><p style='margin:5px 0 0 0;'>You chose: <b>{st.session_state.selected_option}</b></p></div>", unsafe_allow_html=True)
                 if f"scored_{idx}" not in st.session_state:
