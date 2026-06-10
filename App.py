@@ -82,7 +82,7 @@ if "hidden_options" not in st.session_state:
 if "gemini" in st.secrets:
     st.session_state.api_key = st.secrets["gemini"]["api_key"]
 
-# --- SFX AUDIO INJECTION MECHANISM ---
+# --- SFX AUDIO INJECTION ---
 def play_sfx(audio_url):
     st.components.v1.html(
         f"""
@@ -138,7 +138,6 @@ def build_docx_bytes(markdown_text):
     doc = Document()
     doc.add_heading("BrainCrunch Study Reviewer Sheet", level=1)
     
-    # Strip basic structural markup patterns for a clean word file layout
     clean_lines = markdown_text.split("\n")
     for line in clean_lines:
         if line.startswith("## "):
@@ -230,129 +229,121 @@ st.markdown("<h1 style='text-align: center;'>🧠 BrainCrunch Studio Pro</h1>", 
 
 # --- SIDEBAR CONTROL UNIT ---
 with st.sidebar:
-    st.header("⚙️ Global Settings")
+    st.header("⚙️ App Mode")
     user_role = st.selectbox("I am a...", ["Player / Student", "Admin / Creator"])
     
-    st.write("---")
-    st.subheader("💾 Restore Cabinet Backup")
-    backup_file = st.file_uploader("Upload cabinet_backup.json:", type=["json"])
-    if backup_file:
-        try:
-            st.session_state.nested_folders = json.load(backup_file)
-            st.toast("Cabinet Data Restored Successfully! 🗂️")
-        except Exception:
-            st.error("Invalid file layout.")
-
-    # ADMIN / CREATOR DASHBOARD
     if user_role == "Admin / Creator":
         st.write("---")
         st.subheader("🔑 Admin Access")
         admin_pass = st.text_input("Enter Admin Password:", type="password")
-        
         if admin_pass == "studio123":
-            st.success("Access Verified!")
+            st.success("Access Verified! 🛠️")
             
-            if not st.session_state.api_key:
-                st.session_state.api_key = st.text_input("Fallback Gemini API Key:", type="password")
-            
-            st.write("---")
-            st.subheader("🌐 Language & Topic Filter")
-            st.session_state.app_language = st.selectbox("Subject Focus Language:", ["English", "Tagalog / Filipino"])
-            
+            st.markdown("### 🤫 Secret Admin Feature Hub")
             st.subheader("🧙‍♂️ Game Host Persona")
             st.session_state.quiz_host_persona = st.selectbox(
                 "Choose AI Game Master:",
                 ["Enthusiastic School Teacher", "Sarcastic Pirate Coach", "Strict Drill Sergeant", "Whimsical Fantasy Wizard"]
             )
-            
-            st.write("---")
-            st.subheader("🧙‍♂️ AI Content Engine")
-            output_type = st.radio("What should the AI build?", ["Gamified Quiz Decks", "Clean Review Summaries"])
-            
-            if output_type == "Gamified Quiz Decks":
-                question_count = st.number_input("How many questions?", min_value=1, max_value=150, value=5, step=5)
-            
-            st.write("---")
-            input_mode = st.radio("Input Source:", ["Upload Files (PDF, PPTX, DOCX, TXT)", "Voice Lesson Record / Audio Note", "YouTube Video Link"])
-            
-            study_text = ""
-            triggered_generation = False
-            
-            if input_mode == "Upload Files (PDF, PPTX, DOCX, TXT)":
-                uploaded_files = st.file_uploader("Drop slides or files:", type=["pdf", "pptx", "docx", "txt"], accept_multiple_files=True)
-                if uploaded_files and st.button("🚀 Process Study Material", use_container_width=True):
-                    with st.spinner("Extracting content strings... 📂"):
-                        for f in uploaded_files:
-                            study_text += extract_text_from_file(f) + "\n"
-                        triggered_generation = True
-
-            elif input_mode == "Voice Lesson Record / Audio Note":
-                recorded_audio = st.file_uploader("Upload audio lesson clip:", type=["mp3", "wav", "m4a", "ogg"])
-                if recorded_audio and st.button("🎙️ Process Lesson Audio Track", use_container_width=True):
-                    if not st.session_state.api_key:
-                        st.error("API Key required for audio extraction transcript tasks.")
-                    else:
-                        with st.spinner("Transcribing lesson audio... 💬"):
-                            try:
-                                client = genai.Client(api_key=st.session_state.api_key)
-                                audio_upload_res = client.files.upload(file=recorded_audio, mime_type=recorded_audio.type)
-                                tx_prompt = "Transcribe the following lecture audio track exactly, keeping all numbers and core concepts sharp."
-                                tx_response = client.models.generate_content(model="gemini-2.5-flash", contents=[audio_upload_res, tx_prompt])
-                                study_text = tx_response.text
-                                triggered_generation = True
-                            except Exception as audio_err:
-                                st.error(f"Audio processing failure checklist: {audio_err}")
-
-            elif input_mode == "YouTube Video Link":
-                yt_url = st.text_input("YouTube Video URL:")
-                if yt_url and st.button("🎬 Process Video Streams", use_container_width=True):
-                    with st.spinner("Analyzing transcript... 🍿"):
-                        v_id = get_youtube_id(yt_url)
-                        if v_id:
-                            extracted_yt = get_youtube_transcript(v_id)
-                            if extracted_yt:
-                                study_text = extracted_yt
-                                triggered_generation = True
-            
-            if triggered_generation and study_text:
-                if output_type == "Gamified Quiz Decks":
-                    ai_qs = generate_questions_with_ai(study_text, st.session_state.api_key, question_count, st.session_state.quiz_host_persona, st.session_state.app_language)
-                    if ai_qs:
-                        st.session_state.questions = ai_qs
-                        st.session_state.active_mode = "Quiz"
-                        st.session_state.current_index = 0
-                        st.session_state.score = 0
-                        st.session_state.correct_answers_count = 0
-                        st.session_state.streak = 0
-                        st.session_state.max_streak = 0
-                        st.session_state.answered = False
-                        st.session_state.lifeline_5050_used = False
-                        st.session_state.lifeline_hint_used = False
-                        st.session_state.hidden_options = []
-                        st.rerun()
-                else:
-                    ai_notes = generate_summary_with_ai(study_text, st.session_state.api_key, st.session_state.quiz_host_persona, st.session_state.app_language)
-                    if ai_notes:
-                        st.session_state.review_notes = ai_notes
-                        st.session_state.active_mode = "Reviewer"
-                        st.rerun()
-
-            st.write("---")
-            st.subheader("📁 Save to Binders")
-            path_input = st.text_input("Folder Path:", value="Q1 / Science / Biology")
-            if st.button("📂 File Current Data Into Path", use_container_width=True):
-                if st.session_state.active_mode == "Quiz" and st.session_state.questions:
-                    st.session_state.nested_folders[path_input] = {"type": "Quiz", "data": list(st.session_state.questions)}
-                    st.toast(f"Quiz saved to: {path_input}!")
-                    st.rerun()
-                elif st.session_state.active_mode == "Reviewer" and st.session_state.review_notes:
-                    st.session_state.nested_folders[path_input] = {"type": "Reviewer", "data": st.session_state.review_notes}
-                    st.toast(f"Summary Reviewer saved to: {path_input}!")
-                    st.rerun()
         elif admin_pass:
             st.error("Incorrect Password!")
 
-    # PLAYER / STUDENT BINDER DROPDOWN
+    st.write("---")
+    st.header("🎮 Student Core Features")
+    
+    if not st.session_state.api_key:
+        st.session_state.api_key = st.text_input("Enter Gemini API Key to activate generation:", type="password")
+        
+    # Language switch moved here so students can access it natively
+    st.subheader("🌐 Language Filter")
+    st.session_state.app_language = st.selectbox("Select Study Language:", ["English", "Tagalog / Filipino"])
+        
+    st.write("---")
+    st.subheader("🧙‍♂️ AI Content Engine")
+    output_type = st.radio("What should the AI build?", ["Gamified Quiz Decks", "Clean Review Summaries"])
+    
+    if output_type == "Gamified Quiz Decks":
+        question_count = st.number_input("How many questions?", min_value=1, max_value=150, value=5, step=5)
+    
+    st.write("---")
+    input_mode = st.radio("Input Source:", ["Upload Files (PDF, PPTX, DOCX, TXT)", "Voice Lesson Record / Audio Note", "YouTube Video Link"])
+    
+    study_text = ""
+    triggered_generation = False
+    
+    if input_mode == "Upload Files (PDF, PPTX, DOCX, TXT)":
+        uploaded_files = st.file_uploader("Drop slides or files:", type=["pdf", "pptx", "docx", "txt"], accept_multiple_files=True)
+        if uploaded_files and st.button("🚀 Process Study Material", use_container_width=True):
+            with st.spinner("Extracting content strings... 📂"):
+                for f in uploaded_files:
+                    study_text += extract_text_from_file(f) + "\n"
+                triggered_generation = True
+
+    elif input_mode == "Voice Lesson Record / Audio Note":
+        recorded_audio = st.file_uploader("Upload audio lesson clip:", type=["mp3", "wav", "m4a", "ogg"])
+        if recorded_audio and st.button("🎙️ Process Lesson Audio Track", use_container_width=True):
+            if not st.session_state.api_key:
+                st.error("API Key required for audio extraction transcript tasks.")
+            else:
+                with st.spinner("Transcribing lesson audio... 💬"):
+                    try:
+                        client = genai.Client(api_key=st.session_state.api_key)
+                        audio_upload_res = client.files.upload(file=recorded_audio, mime_type=recorded_audio.type)
+                        tx_prompt = "Transcribe the following lecture audio track exactly, keeping all numbers and core concepts sharp."
+                        tx_response = client.models.generate_content(model="gemini-2.5-flash", contents=[audio_upload_res, tx_prompt])
+                        study_text = tx_response.text
+                        triggered_generation = True
+                    except Exception as audio_err:
+                        st.error(f"Audio processing failure checklist: {audio_err}")
+
+    elif input_mode == "YouTube Video Link":
+        yt_url = st.text_input("YouTube Video URL:")
+        if yt_url and st.button("🎬 Process Video Streams", use_container_width=True):
+            with st.spinner("Analyzing transcript... 🍿"):
+                v_id = get_youtube_id(yt_url)
+                if v_id:
+                    extracted_yt = get_youtube_transcript(v_id)
+                    if extracted_yt:
+                        study_text = extracted_yt
+                        triggered_generation = True
+    
+    if triggered_generation and study_text:
+        if output_type == "Gamified Quiz Decks":
+            ai_qs = generate_questions_with_ai(study_text, st.session_state.api_key, question_count, st.session_state.quiz_host_persona, st.session_state.app_language)
+            if ai_qs:
+                st.session_state.questions = ai_qs
+                st.session_state.active_mode = "Quiz"
+                st.session_state.current_index = 0
+                st.session_state.score = 0
+                st.session_state.correct_answers_count = 0
+                st.session_state.streak = 0
+                st.session_state.max_streak = 0
+                st.session_state.answered = False
+                st.session_state.lifeline_5050_used = False
+                st.session_state.lifeline_hint_used = False
+                st.session_state.hidden_options = []
+                st.rerun()
+        else:
+            ai_notes = generate_summary_with_ai(study_text, st.session_state.api_key, st.session_state.quiz_host_persona, st.session_state.app_language)
+            if ai_notes:
+                st.session_state.review_notes = ai_notes
+                st.session_state.active_mode = "Reviewer"
+                st.rerun()
+
+    st.write("---")
+    st.subheader("📁 Save to Binders")
+    path_input = st.text_input("Folder Path:", value="Q1 / Science / Biology")
+    if st.button("📂 File Current Data Into Path", use_container_width=True):
+        if st.session_state.active_mode == "Quiz" and st.session_state.questions:
+            st.session_state.nested_folders[path_input] = {"type": "Quiz", "data": list(st.session_state.questions)}
+            st.toast(f"Quiz saved to: {path_input}!")
+            st.rerun()
+        elif st.session_state.active_mode == "Reviewer" and st.session_state.review_notes:
+            st.session_state.nested_folders[path_input] = {"type": "Reviewer", "data": st.session_state.review_notes}
+            st.toast(f"Summary Reviewer saved to: {path_input}!")
+            st.rerun()
+
+    # STUDENT BINDER DROPDOWN
     st.write("---")
     st.header("🗂️ Study Binders")
     if st.session_state.nested_folders:
@@ -375,22 +366,13 @@ with st.sidebar:
                 st.session_state.review_notes = saved_item["data"]
                 st.session_state.active_mode = "Reviewer"
             st.rerun()
-            
-        exported_json = json.dumps(st.session_state.nested_folders)
-        st.download_button(
-            label="📥 Download Cabinet Backup",
-            data=exported_json,
-            file_name="cabinet_backup.json",
-            mime="application/json",
-            use_container_width=True
-        )
     else:
         st.caption("No custom subject tracks saved yet.")
 
 # --- MAIN RUNTIME ARENA ---
 
 if st.session_state.active_mode == "Welcome":
-    st.info("👋 **Welcome to the Game Arena!**\n\nOpen the left sidebar menu panel (`>>`) and select a subject folder from the **Study Binders** section to instantly start playing quizzes or reviewing core summary notes!")
+    st.info("👋 **Welcome to the Game Arena!**\n\nUse the sidebar panel to generate flash quizzes, read summary sheets, or load saved topics out of your Study Binders folder cabinet tracker!")
 
 elif st.session_state.active_mode == "Reviewer":
     st.markdown("## 📑 Smart Summary Reviewer Sheet")
@@ -398,13 +380,12 @@ elif st.session_state.active_mode == "Reviewer":
     st.markdown(st.session_state.review_notes)
     st.write("---")
     
-    # NEW EXPORT HUB INTERFACE
+    # EXPORT HUB INTERFACE
     st.markdown("### 📤 Student Export Hub")
     st.caption("Copy this summary sheet directly to your computer clipboard or extract it into your word processing documents!")
     
     col_exp1, col_exp2 = st.columns(2)
     with col_exp1:
-        # Streamlit Built-in Copy Area Widget Container
         st.text_area("📋 Copy to Clipboard Panel (Select All -> Copy):", value=st.session_state.review_notes, height=80)
         
     with col_exp2:
@@ -418,7 +399,6 @@ elif st.session_state.active_mode == "Reviewer":
                 use_container_width=True
             )
         else:
-            # Fallback to Text layout if python-docx is compiling away
             st.download_button(
                 label="📝 Export to Plain Text (.txt)",
                 data=st.session_state.review_notes,
@@ -430,10 +410,8 @@ elif st.session_state.active_mode == "Reviewer":
 
     st.write("---")
     
-    # EXTERNAL DIRECTIONAL HUBS FOR GENERAL REVIEW TRACKS
+    # EXTERNAL DIRECTIONAL HUBS
     st.markdown("### 🔍 Need a Video Explainer for This Lesson?")
-    st.caption("Don't understand a concept? Use these quick shortcuts to find lessons matching your study guide path!")
-    
     try:
         clean_topic_query = urllib.parse.quote(selected_path.replace("/", " "))
     except Exception:
@@ -509,7 +487,7 @@ elif st.session_state.active_mode == "Quiz":
             correct_letter = current_q["correct"]
             
             if user_letter == correct_letter:
-                st.markdown(f"<div style='background-color:#d4edda; color:#155724; border-radius:10px; padding:15px; border-left:6px solid #28a745; margin-bottom:15px;'><h4 style='margin:0;'>🎉 EXCELLENT HIT! / TAMA!</h4><p style='margin:5px 0 0 0;'>You chose: <b>{st.session_state.selected_option}</b></p></div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='background-color:#d4edda; color:#155724; border-radius:10px; padding:15px; border-left:6px solid #28a745; margin-bottom:15px;'><h4 style='margin:0;'>🎉 EXCELLENT HIT!</h4><p style='margin:5px 0 0 0;'>You chose: <b>{st.session_state.selected_option}</b></p></div>", unsafe_allow_html=True)
                 if f"scored_{idx}" not in st.session_state:
                     st.session_state.score += 10 + (st.session_state.streak * 2)
                     st.session_state.streak += 1
@@ -518,17 +496,15 @@ elif st.session_state.active_mode == "Quiz":
                         st.session_state.max_streak = st.session_state.streak
                     st.session_state[f"scored_{idx}"] = True
             else:
-                st.markdown(f"<div style='background-color:#f8d7da; color:#721c24; border-radius:10px; padding:15px; border-left:6px solid #dc3545; margin-bottom:15px;'><h4 style='margin:0;'>💔 DEFLECTED / MALI</h4><p style='margin:5px 0 0 0;'>You chose <b>{user_letter}</b>. Correct path: <b>{correct_letter}</b>.</p></div>", unsafe_allow_html=True)
+                st.markdown(f"<div style='background-color:#f8d7da; color:#721c24; border-radius:10px; padding:15px; border-left:6px solid #dc3545; margin-bottom:15px;'><h4 style='margin:0;'>💔 DEFLECTED</h4><p style='margin:5px 0 0 0;'>You chose <b>{user_letter}</b>. Correct path: <b>{correct_letter}</b>.</p></div>", unsafe_allow_html=True)
                 st.session_state.streak = 0
                 
             st.markdown(f"**🧠 Memory Scoop ({st.session_state.quiz_host_persona}):**")
             st.write(current_q['explanation'])
             
-            # --- DYNAMIC EXTERNAL REDIRECTION HUD PER QUESTION ---
+            # DYNAMIC REDIRECTION HUD
             st.write("")
             st.markdown("#### 📺 Confused About This Question?")
-            st.caption("Launch a target vector query into search spaces to view instant mini-lectures on this topic:")
-            
             query_keywords = re.sub(r'[^\w\s]', '', current_q['question'])
             encoded_query = urllib.parse.quote(query_keywords)
             
@@ -555,37 +531,4 @@ elif st.session_state.active_mode == "Quiz":
         st.subheader("📊 Performance Scorecard")
         
         total_qs = len(st.session_state.questions)
-        accuracy_pct = int((st.session_state.correct_answers_count / total_qs) * 100) if total_qs > 0 else 0
-        
-        col_an1, col_an2, col_an3 = st.columns(3)
-        with col_an1:
-            st.metric(label="🎖️ Score", value=f"{st.session_state.score} pts")
-        with col_an2:
-            st.metric(label="🎯 Accuracy", value=f"{accuracy_pct}%")
-        with col_an3:
-            st.metric(label="🔥 Max Streak", value=f"{st.session_state.max_streak}")
-            
-        player_name = st.text_input("Enter name for scoreboard matrix:", value="Player 1")
-        if st.button("💾 Log Score", use_container_width=True):
-            st.session_state.leaderboard.append({"name": player_name, "score": st.session_state.score, "accuracy": accuracy_pct})
-            st.toast("Score logged into local system matrix!")
-            st.rerun()
-            
-        if st.session_state.leaderboard:
-            st.write("### 🏁 Current Rankings")
-            sorted_board = sorted(st.session_state.leaderboard, key=lambda x: x['score'], reverse=True)
-            for place, entry in enumerate(sorted_board, 1):
-                st.write(f"**#{place}** {entry['name']} — `{entry['score']} pts` ({entry.get('accuracy', 0)}% Accuracy)")
-        
-        if st.button("🔄 Replay Session", use_container_width=True):
-            st.session_state.current_index = 0
-            st.session_state.score = 0
-            st.session_state.correct_answers_count = 0
-            st.session_state.streak = 0
-            st.session_state.max_streak = 0
-            st.session_state.answered = False
-            st.session_state.selected_option = None
-            st.session_state.lifeline_5050_used = False
-            st.session_state.lifeline_hint_used = False
-            st.session_state.hidden_options = []
-            st.rerun()
+        accuracy_pct = int((st.session_state.correct_answers_count / total_qs) * 100) if total_
