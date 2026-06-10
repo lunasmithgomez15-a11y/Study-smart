@@ -2,3 +2,5 @@ streamlit
 pypdf
 youtube-transcript-api
 google-genai
+python-pptx
+python-docx
