@@ -1,0 +1,4 @@
+streamlit
+pypdf
+youtube-transcript-api
+google-genai
