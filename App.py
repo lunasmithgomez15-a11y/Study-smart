@@ -9,7 +9,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
-# Safe fallbacks for document processing libraries
+# Safe fallbacks for optional document processing libraries
 try:
     from pptx import Presentation
 except ImportError:
@@ -52,7 +52,7 @@ if "streak" not in st.session_state:
 if "leaderboard" not in st.session_state:
     st.session_state.leaderboard = []
 if "quiz_folders" not in st.session_state:
-    st.session_state.quiz_folders = {} # Schema: {"Subject Name": [list of quiz questions]}
+    st.session_state.quiz_folders = {}
 
 # --- DECODE SHARE LINKS INSTANTLY ---
 if "challenge" in st.query_params and not st.session_state.questions:
@@ -137,7 +137,7 @@ def generate_questions_with_ai(study_material, api_key):
 # --- WEB APP FRONTEND ---
 
 st.title("🧠 BrainCrunch AI Studio")
-st.caption("Organize study material folders and battle friends inside your personalized mobile arcade arena!")
+st.caption("Organize your subjects into custom folders and challenge your friends!")
 
 # --- SIDEBAR CONTROL UNIT ---
 with st.sidebar:
@@ -148,10 +148,10 @@ with st.sidebar:
         
     st.write("---")
     st.header("🎮 Generator Dashboard")
-    mode = st.radio("Choose Input Type:", ["Upload Files (PDF, PPT, DOCX)", "YouTube Video Link", "Enter Friend's Share Code"])
+    mode = st.radio("Choose Input Type:", ["Upload Files (PDF, PPTX, DOCX, TXT)", "YouTube Video Link", "Enter Friend's Share Code"])
     
-    # 1. FILE UPLOAD FACTORY
-    if mode == "Upload Files (PDF, PPT, DOCX)":
+    # 1. THE FILE ENGINE
+    if mode == "Upload Files (PDF, PPTX, DOCX, TXT)":
         st.subheader("📁 Study Locker")
         uploaded_files = st.file_uploader("Drop notes, presentations, or papers:", type=["pdf", "pptx", "docx", "txt"], accept_multiple_files=True)
         
@@ -159,7 +159,7 @@ with st.sidebar:
             if not st.session_state.api_key:
                 st.error("Please provide your API key first!")
             else:
-                with st.spinner("AI processing your study material vault... 🍳"):
+                with st.spinner("AI parsing your study material vault... 🍳"):
                     combined_text = ""
                     for f in uploaded_files:
                         combined_text += extract_text_from_file(f) + "\n"
@@ -174,7 +174,7 @@ with st.sidebar:
                         st.sidebar.success(f"Generated {len(ai_questions)} levels!")
                         st.rerun()
 
-    # 2. YOUTUBE FACTORY
+    # 2. THE YOUTUBE ENGINE
     elif mode == "YouTube Video Link":
         st.subheader("📺 Paste Video Stream")
         yt_url = st.text_input("YouTube Video URL:")
@@ -198,7 +198,7 @@ with st.sidebar:
                                 st.sidebar.success("Video levels initialized!")
                                 st.rerun()
 
-    # 3. CODE INJECTOR
+    # 3. SHARE CODE INJECTOR
     elif mode == "Enter Friend's Share Code":
         st.subheader("📥 Enter Study Circle Code")
         input_code = st.text_area("Paste code block here:")
@@ -216,5 +216,136 @@ with st.sidebar:
                 except Exception:
                     st.sidebar.error("Invalid share code pattern.")
 
-    st.write("
+    st.write("---")
+    st.header("🗂️ Subject Folders")
     
+    # Save active deck to folder segregation area
+    if st.session_state.questions:
+        st.write("**File Current Quiz Away:**")
+        folder_name = st.text_input("Subject / Topic Title:", value="Science 101", key="folder_save_input")
+        if st.button("📂 Save Quiz to Folder", use_container_width=True):
+            st.session_state.quiz_folders[folder_name] = st.session_state.questions
+            st.toast(f"Saved into folder: {folder_name}! 📁")
+            st.rerun()
+            
+    # Display current available folders
+    if st.session_state.quiz_folders:
+        st.write("**Your Saved Folders:**")
+        for f_name, saved_q in st.session_state.quiz_folders.items():
+            col_load, col_del = st.columns([3, 1])
+            with col_load:
+                if st.button(f"📁 {f_name} ({len(saved_q)} Qs)", key=f"load_f_{f_name}", use_container_width=True):
+                    st.session_state.questions = saved_q
+                    st.session_state.current_index = 0
+                    st.session_state.score = 0
+                    st.session_state.streak = 0
+                    st.session_state.answered = False
+                    st.toast(f"Loaded folder: {f_name}! 🎮")
+                    st.rerun()
+            with col_del:
+                if st.button("❌", key=f"del_f_{f_name}"):
+                    del st.session_state.quiz_folders[f_name]
+                    st.rerun()
+    else:
+        st.caption("No folders created yet. Generate a quiz and save it here!")
+
+    st.write("---")
+    if st.button("🔄 Full Arena Reset", use_container_width=True):
+        st.session_state.questions = []
+        st.session_state.quiz_folders = {}
+        st.session_state.current_index = 0
+        st.session_state.score = 0
+        st.session_state.streak = 0
+        st.session_state.answered = False
+        st.session_state.selected_option = None
+        st.query_params.clear()
+        st.rerun()
+
+# --- MAIN RUNTIME ARENA ---
+if not st.session_state.questions:
+    st.info("💡 **Welcome to BrainCrunch Studio!**\n\n1. Open the left control panel using the `>>` button.\n2. Paste your Gemini API key.\n3. Drop notes, PPTX slides, word files, or video links.\n4. Save your quiz tracks into **Subject Folders** to switch topics effortlessly!")
+else:
+    idx = st.session_state.current_index
+    if idx < len(st.session_state.questions):
+        current_q = st.session_state.questions[idx]
+        
+        # UI Header Metrics
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(label="🏆 Score", value=f"{st.session_state.score} pts")
+        with col2:
+            st.metric(label="🔥 Streak", value=f"{st.session_state.streak} Wins")
+        with col3:
+            st.write(f"Stage {idx + 1} / {len(st.session_state.questions)}")
+            
+        st.progress((idx) / len(st.session_state.questions))
+        st.write("---")
+        
+        st.markdown(f"### ❓ {current_q['question']}")
+        
+        # Tap options for fast phone execution
+        for option in current_q['options']:
+            if not st.session_state.answered:
+                if st.button(option, key=f"btn_{idx}_{option}", use_container_width=True):
+                    st.session_state.answered = True
+                    st.session_state.selected_option = option
+                    st.rerun()
+                    
+        if st.session_state.answered:
+            user_letter = st.session_state.selected_option[0]
+            correct_letter = current_q["correct"]
+            
+            if user_letter == correct_letter:
+                st.balloons()
+                st.success(f"🌟 **CORRECT HIT!** You chose: {st.session_state.selected_option}")
+                if f"scored_{idx}" not in st.session_state:
+                    st.session_state.score += 10 + (st.session_state.streak * 2)
+                    st.session_state.streak += 1
+                    st.session_state[f"scored_{idx}"] = True
+            else:
+                st.snow()
+                st.error(f"💔 **DEFLECTED.** You chose {user_letter}. Correct answer path: **{correct_letter}**.")
+                st.session_state.streak = 0
+                
+            st.info(f"💡 **Memory Scoop:**\n\n{current_q['explanation']}")
+            
+            if st.button("➡️ Advance to Next Level", use_container_width=True):
+                st.session_state.current_index += 1
+                st.session_state.answered = False
+                st.session_state.selected_option = None
+                st.rerun()
+    else:
+        # --- END RUN LOBBY & SHARING UNIT ---
+        st.success("🏆 **CAMP RUN COMPLETED!** 🏆")
+        
+        st.subheader("📊 Performance Scorecard")
+        st.metric(label="🎖️ Your Final Score", value=f"{st.session_state.score} Points")
+        
+        player_name = st.text_input("Enter your name for the Score Matrix Board:", value="Player 1")
+        if st.button("💾 Log Score", use_container_width=True):
+            st.session_state.leaderboard.append({"name": player_name, "score": st.session_state.score})
+            st.toast("Score added to local bracket session!", icon="🛡️")
+            
+        if st.session_state.leaderboard:
+            st.write("### 🏁 Local Session Ranking")
+            sorted_board = sorted(st.session_state.leaderboard, key=lambda x: x['score'], reverse=True)
+            for place, entry in enumerate(sorted_board, 1):
+                st.write(f"**#{place}** {entry['name']} — `{entry['score']} pts`")
+
+        st.write("---")
+        st.subheader("📢 Challenge Your Friends!")
+        st.write("Text this unique share code to your friends. They can paste it on their app to play this exact deck!")
+        
+        raw_json = json.dumps(st.session_state.questions)
+        encoded_string = base64.b64encode(raw_json.encode('utf-8')).decode('utf-8')
+        
+        st.text_area("📋 Copy this Share Code:", value=encoded_string)
+        
+        if st.button("🔄 Reset & Replay This Session", use_container_width=True):
+            st.session_state.current_index = 0
+            st.session_state.score = 0
+            st.session_state.streak = 0
+            st.session_state.answered = False
+            st.session_state.selected_option = None
+            st.rerun()
+                
