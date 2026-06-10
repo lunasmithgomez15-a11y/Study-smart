@@ -51,8 +51,11 @@ if "streak" not in st.session_state:
     st.session_state.streak = 0
 if "leaderboard" not in st.session_state:
     st.session_state.leaderboard = []
-if "quiz_folders" not in st.session_state:
-    st.session_state.quiz_folders = {}
+    
+# Deep nested directory architecture storage 
+# Stores as: {"Quarter 1 / Science / Biology": [questions_list]}
+if "nested_folders" not in st.session_state:
+    st.session_state.nested_folders = {}
 
 # --- DECODE SHARE LINKS INSTANTLY ---
 if "challenge" in st.query_params and not st.session_state.questions:
@@ -68,12 +71,10 @@ if "challenge" in st.query_params and not st.session_state.questions:
 def extract_text_from_file(file):
     filename = file.name.lower()
     text = ""
-    
     if filename.endswith(".pdf"):
         reader = PdfReader(file)
         for page in reader.pages:
             text += page.extract_text() or ""
-            
     elif filename.endswith(".pptx"):
         if Presentation:
             prs = Presentation(file)
@@ -82,18 +83,15 @@ def extract_text_from_file(file):
                     if hasattr(shape, "text"):
                         text += shape.text + "\n"
         else:
-            st.error("Add python-pptx to requirements.txt to parse presentations!")
-            
+            st.error("Add python-pptx to requirements.txt!")
     elif filename.endswith(".docx"):
         if docx:
             doc = docx.Document(file)
             text += "\n".join([p.text for p in doc.paragraphs])
         else:
-            st.error("Add python-docx to requirements.txt to parse Word files!")
-            
+            st.error("Add python-docx to requirements.txt!")
     elif filename.endswith(".txt"):
         text += file.read().decode("utf-8", errors="ignore")
-        
     return text
 
 def get_youtube_id(url):
@@ -137,7 +135,7 @@ def generate_questions_with_ai(study_material, api_key, num_questions):
 # --- WEB APP FRONTEND ---
 
 st.title("🧠 BrainCrunch AI Studio")
-st.caption("Organize your subjects into custom folders, choose your test size, and challenge your friends!")
+st.caption("Build deep multi-level study binders, filter questions, and dominate with your friends!")
 
 # --- SIDEBAR CONTROL UNIT ---
 with st.sidebar:
@@ -149,34 +147,23 @@ with st.sidebar:
     st.write("---")
     st.header("🎮 Generator Dashboard")
     
-    # 🌟 NEW FEATURE: QUESTION LENGTH SELECTOR 🌟
     st.subheader("📏 Session Length")
-    question_count = st.number_input(
-        "How many questions do you want?", 
-        min_value=1, 
-        max_value=150, 
-        value=5, 
-        step=5,
-        help="Type or select any amount up to 150 questions!"
-    )
+    question_count = st.number_input("How many questions?", min_value=1, max_value=150, value=5, step=5)
     
     st.write("---")
     mode = st.radio("Choose Input Type:", ["Upload Files (PDF, PPTX, DOCX, TXT)", "YouTube Video Link", "Enter Friend's Share Code"])
     
-    # 1. THE FILE ENGINE
     if mode == "Upload Files (PDF, PPTX, DOCX, TXT)":
         st.subheader("📁 Study Locker")
-        uploaded_files = st.file_uploader("Drop notes, presentations, or papers:", type=["pdf", "pptx", "docx", "txt"], accept_multiple_files=True)
-        
+        uploaded_files = st.file_uploader("Drop notes or presentations:", type=["pdf", "pptx", "docx", "txt"], accept_multiple_files=True)
         if uploaded_files and st.button("🧙‍♂️ Bake Files to Levels!", use_container_width=True):
             if not st.session_state.api_key:
                 st.error("Please provide your API key first!")
             else:
-                with st.spinner(f"AI reading materials to create {question_count} levels... 🍳"):
+                with st.spinner(f"AI parsing materials into {question_count} levels... 🍳"):
                     combined_text = ""
                     for f in uploaded_files:
                         combined_text += extract_text_from_file(f) + "\n"
-                    
                     ai_questions = generate_questions_with_ai(combined_text, st.session_state.api_key, question_count)
                     if ai_questions:
                         st.session_state.questions = ai_questions
@@ -184,19 +171,16 @@ with st.sidebar:
                         st.session_state.score = 0
                         st.session_state.streak = 0
                         st.session_state.answered = False
-                        st.sidebar.success(f"Generated {len(ai_questions)} levels!")
                         st.rerun()
 
-    # 2. THE YOUTUBE ENGINE
     elif mode == "YouTube Video Link":
         st.subheader("📺 Paste Video Stream")
         yt_url = st.text_input("YouTube Video URL:")
-        
         if yt_url and st.button("🎬 Convert Video to Levels!", use_container_width=True):
             if not st.session_state.api_key:
                 st.error("Please provide your API key first!")
             else:
-                with st.spinner(f"Analyzing video to bake {question_count} levels... 🍿"):
+                with st.spinner("Analyzing video... 🍿"):
                     v_id = get_youtube_id(yt_url)
                     if v_id:
                         transcript_text = get_youtube_transcript(v_id)
@@ -208,10 +192,8 @@ with st.sidebar:
                                 st.session_state.score = 0
                                 st.session_state.streak = 0
                                 st.session_state.answered = False
-                                st.sidebar.success(f"Video levels initialized with {len(ai_questions)} tasks!")
                                 st.rerun()
 
-    # 3. SHARE CODE INJECTOR
     elif mode == "Enter Friend's Share Code":
         st.subheader("📥 Enter Study Circle Code")
         input_code = st.text_area("Paste code block here:")
@@ -224,65 +206,101 @@ with st.sidebar:
                     st.session_state.score = 0
                     st.session_state.streak = 0
                     st.session_state.answered = False
-                    st.sidebar.success("Friend's quiz successfully synchronized!")
                     st.rerun()
                 except Exception:
                     st.sidebar.error("Invalid share code pattern.")
 
     st.write("---")
-    st.header("🗂️ Subject Folders")
+    st.header("🗂️ Nested Binder Vault")
     
-    # Save active deck to folder segregation area
+    # NESTED FILING DRAWER ENGINE
     if st.session_state.questions:
-        st.write("**File Current Quiz Away:**")
-        folder_name = st.text_input("Subject / Topic Title:", value="Science 101", key="folder_save_input")
-        if st.button("📂 Save Quiz to Folder", use_container_width=True):
-            st.session_state.quiz_folders[folder_name] = st.session_state.questions
-            st.toast(f"Saved into folder: {folder_name}! 📁")
+        st.write("**File Active Quiz Path:**")
+        st.caption("Use slashes to build multi-levels (e.g., `Quarter 1 / Science / Biology`)")
+        path_input = st.text_input("Folder Structure Path:", value="Quarter 1 / Science / Biology")
+        if st.button("💾 File Into Nest Path", use_container_width=True):
+            st.session_state.nested_folders[path_input] = list(st.session_state.questions)
+            st.toast(f"Filed successfully into: {path_input}!", icon="📂")
             st.rerun()
             
-    # Display current available folders
-    if st.session_state.quiz_folders:
-        st.write("**Your Saved Folders:**")
-        for f_name, saved_q in st.session_state.quiz_folders.items():
-            col_load, col_del = st.columns([3, 1])
-            with col_load:
-                if st.button(f"📁 {f_name} ({len(saved_q)} Qs)", key=f"load_f_{f_name}", use_container_width=True):
-                    st.session_state.questions = saved_q
-                    st.session_state.current_index = 0
-                    st.session_state.score = 0
-                    st.session_state.streak = 0
-                    st.session_state.answered = False
-                    st.toast(f"Loaded folder: {f_name}! 🎮")
-                    st.rerun()
-            with col_del:
-                if st.button("❌", key=f"del_f_{f_name}"):
-                    del st.session_state.quiz_folders[f_name]
-                    st.rerun()
+    # DISPLAY FILE TREE DROPDOWN SELECTORS
+    if st.session_state.nested_folders:
+        st.write("**Your Binders:**")
+        selected_path = st.selectbox("Select a folder path to open:", list(st.session_state.nested_folders.keys()))
+        
+        col_load, col_del = st.columns([2, 1])
+        with col_load:
+            if st.button("🎮 Load Selected Deck", use_container_width=True):
+                st.session_state.questions = list(st.session_state.nested_folders[selected_path])
+                st.session_state.current_index = 0
+                st.session_state.score = 0
+                st.session_state.streak = 0
+                st.session_state.answered = False
+                st.toast(f"Loaded: {selected_path}!", icon="⚡")
+                st.rerun()
+        with col_del:
+            if st.button("🗑️ Delete Path", use_container_width=True):
+                del st.session_state.nested_folders[selected_path]
+                st.rerun()
     else:
-        st.caption("No folders created yet. Generate a quiz and save it here!")
+        st.caption("Your filing cabinet is empty. Set a folder path to save one!")
 
     st.write("---")
     if st.button("🔄 Full Arena Reset", use_container_width=True):
         st.session_state.questions = []
-        st.session_state.quiz_folders = {}
+        st.session_state.nested_folders = {}
         st.session_state.current_index = 0
         st.session_state.score = 0
         st.session_state.streak = 0
         st.session_state.answered = False
-        st.session_state.selected_option = None
         st.query_params.clear()
         st.rerun()
 
 # --- MAIN RUNTIME ARENA ---
+
+# --- DYNAMIC INTERACTIVE DECK EDITOR ---
+if st.session_state.questions:
+    with st.expander("🛠️ ACTIVE DECK EDITOR & MOVEMENT MATRIX", expanded=False):
+        st.write("Review, edit, or remove specific quiz questions from this pool before playing or filing:")
+        
+        # Move Entire Deck to a New Nest Configuration
+        st.markdown("#### 📦 Change Active Folder Location")
+        new_move_path = st.text_input("Re-route folder path title:", value="Quarter 1 / Science / Biology", key="move_path_editor_field")
+        if st.button("🚚 Relocate Active Quiz Deck", use_container_width=True):
+            st.session_state.nested_folders[new_move_path] = list(st.session_state.questions)
+            st.toast(f"Moved and compiled into: {new_move_path}!")
+            st.rerun()
+            
+        st.write("---")
+        st.markdown("#### ✂️ Delete Specific Questions")
+        
+        questions_to_delete = []
+        for i, q in enumerate(st.session_state.questions):
+            col_q_text, col_q_action = st.columns([5, 1])
+            with col_q_text:
+                st.markdown(f"**Q{i+1}:** {q['question']}")
+            with col_q_action:
+                if st.button("❌ Remove", key=f"del_single_q_{i}"):
+                    questions_to_delete.append(i)
+                    
+        if questions_to_delete:
+            for index in sorted(questions_to_delete, reverse=True):
+                st.session_state.questions.pop(index)
+            # Reset active state indices safely to prevent overflow out of bounds
+            st.session_state.current_index = 0
+            st.session_state.answered = False
+            st.toast("Selected question stripped from deck map successfully!", icon="✂️")
+            st.rerun()
+
+# --- GAME RUNTIME ENGINE ---
 if not st.session_state.questions:
-    st.info("💡 **Welcome to BrainCrunch Studio!**\n\n1. Open the left control panel using the `>>` button.\n2. Paste your Gemini API key.\n3. **Choose your desired question count.**\n4. Drop notes, PPTX slides, word files, or video links to start!")
+    st.info("💡 **Welcome to your Advanced BrainCrunch Binder!**\n\n1. Open the left sidebar menu panel.\n2. Enter your Gemini API Key.\n3. Type custom nested folder names using slashes (`Quarter 1 / Science / Biology`).\n4. Drop study material files or YouTube links to start baking tasks!")
 else:
     idx = st.session_state.current_index
     if idx < len(st.session_state.questions):
         current_q = st.session_state.questions[idx]
         
-        # UI Header Metrics
+        # UI Header Metrics Display
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric(label="🏆 Score", value=f"{st.session_state.score} pts")
@@ -296,7 +314,7 @@ else:
         
         st.markdown(f"### ❓ {current_q['question']}")
         
-        # Tap options for fast phone execution
+        # Fast execution answer triggers
         for option in current_q['options']:
             if not st.session_state.answered:
                 if st.button(option, key=f"btn_{idx}_{option}", use_container_width=True):
@@ -328,13 +346,13 @@ else:
                 st.session_state.selected_option = None
                 st.rerun()
     else:
-        # --- END RUN LOBBY & SHARING UNIT ---
+        # --- LOBBY COMPLETED HUB ---
         st.success("🏆 **CAMP RUN COMPLETED!** 🏆")
         
         st.subheader("📊 Performance Scorecard")
         st.metric(label="🎖️ Your Final Score", value=f"{st.session_state.score} Points")
         
-        player_name = st.text_input("Enter your name for the Score Matrix Board:", value="Player 1")
+        player_name = st.text_input("Enter your name for the Score Board:", value="Player 1")
         if st.button("💾 Log Score", use_container_width=True):
             st.session_state.leaderboard.append({"name": player_name, "score": st.session_state.score})
             st.toast("Score added to local bracket session!", icon="🛡️")
@@ -347,7 +365,6 @@ else:
 
         st.write("---")
         st.subheader("📢 Challenge Your Friends!")
-        st.write("Text this unique share code to your friends. They can paste it on their app to play this exact deck!")
         
         raw_json = json.dumps(st.session_state.questions)
         encoded_string = base64.b64encode(raw_json.encode('utf-8')).decode('utf-8')
