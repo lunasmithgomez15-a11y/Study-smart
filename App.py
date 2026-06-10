@@ -426,7 +426,7 @@ elif st.session_state.active_mode == "Quiz":
         
         for option in current_q['options']:
             if option in st.session_state.hidden_options:
-  continue 
+                continue 
             if not st.session_state.answered:
                 if st.button(option, key=f"btn_{idx}_{option}", use_container_width=True):
                     st.session_state.answered = True
@@ -441,7 +441,7 @@ elif st.session_state.active_mode == "Quiz":
         if st.session_state.answered:
             user_letter = st.session_state.selected_option[0]
             correct_letter = current_q["correct"]
-            
+         
             if user_letter == correct_letter:
                 st.markdown(f"<div style='background-color:#d4edda; color:#155724; border-radius:10px; padding:15px; border-left:6px solid #28a745; margin-bottom:15px;'><h4 style='margin:0;'>🎉 EXCELLENT HIT! / TAMA!</h4><p style='margin:5px 0 0 0;'>You chose: <b>{st.session_state.selected_option}</b></p></div>", unsafe_allow_html=True)
                 if f"scored_{idx}" not in st.session_state:
