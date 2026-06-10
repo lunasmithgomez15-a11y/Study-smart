@@ -94,4 +94,129 @@ def play_sfx(audio_url):
     )
 
 CORRECT_SFX = "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg"
-WRONG_SFX = "
+WRONG_SFX = "https://actions.google.com/sounds/v1/cartoon/slide_whistle_down.ogg"
+
+# --- FILE EXTRACTOR MECHANISM ---
+def extract_text_from_file(file):
+    filename = file.name.lower()
+    text = ""
+    if filename.endswith(".pdf"):
+        reader = PdfReader(file)
+        for page in reader.pages:
+            text += page.extract_text() or ""
+    elif filename.endswith(".pptx"):
+        if Presentation:
+            prs = Presentation(file)
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text"):
+                        text += shape.text + "\n"
+    elif filename.endswith(".docx"):
+        if docx:
+            doc = docx.Document(file)
+            text += "\n".join([p.text for p in doc.paragraphs])
+    elif filename.endswith(".txt"):
+        text += file.read().decode("utf-8", errors="ignore")
+    return text
+
+def get_youtube_id(url):
+    pattern = r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
+    match = re.search(pattern, url)
+    return match.group(1) if match else None
+
+def get_youtube_transcript(video_id):
+    try:
+        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+        return " ".join([item['text'] for item in transcript_list])
+    except Exception:
+        return None
+
+# --- DOCX CONVERTER ENGINE ---
+def build_docx_bytes(markdown_text):
+    if not Document:
+        return None
+    doc = Document()
+    doc.add_heading("BrainCrunch Study Reviewer Sheet", level=1)
+    
+    clean_lines = markdown_text.split("\n")
+    for line in clean_lines:
+        if line.startswith("## "):
+            doc.add_heading(line.replace("## ", ""), level=2)
+        elif line.startswith("### "):
+            doc.add_heading(line.replace("### ", ""), level=3)
+        elif line.startswith("- ") or line.startswith("* "):
+            clean_bullet = line.replace("- ", "").replace("* ", "")
+            doc.add_paragraph(clean_bullet, style="List Bullet")
+        else:
+            if line.strip():
+                doc.add_paragraph(line)
+                
+    bio = io.BytesIO()
+    doc.save(bio)
+    return bio.getvalue()
+
+# --- DEEP AI CORE ENGINES (PRO -> FLASH FALLBACK) ---
+def generate_questions_with_ai(study_material, api_key, num_questions, persona, language):
+    lang_instruction = "All outputs must be written entirely in English."
+    if language == "Tagalog / Filipino":
+        lang_instruction = "CRITICAL: You are teaching a Filipino/Tagalog class. All questions, options, and explanations MUST be written in clear, natural Tagalog."
+
+    prompt = f"""
+    You are a smart game host playing with a student. Use this personality profile: "{persona}".
+    {lang_instruction}
+    
+    TASK: Parse the provided text material thoroughly. Perform maximum deep information extraction—do not skip technical details, math variables, or niche terms. Create exactly {num_questions} high-quality multiple-choice questions.
+    
+    MATH RULE: If the question or options involve complex formulas, chemical equations, or mathematical expressions, format them cleanly using standard LaTeX notation (wrap with single '$' for inline math or double '$$' for large block equations) so they render beautifully on screen.
+    
+    Study Material:
+    {study_material}
+    """
+    
+    for target_model in ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-1.5-flash']:
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=target_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=list[QuizQuestion],
+                ),
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            if any(err in str(e) for err in ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED"]):
+                continue
+            st.error(f"🛑 AI System Error: {e}")
+            return None
+
+def generate_summary_with_ai(study_material, api_key, persona, language):
+    lang_instruction = "Write the summary sheet in English."
+    if language == "Tagalog / Filipino":
+        lang_instruction = "CRITICAL: Write the entire summary sheet in fluent Tagalog/Filipino language."
+
+    prompt = f"""
+    You are an expert academic tutor with this personality profile: "{persona}".
+    {lang_instruction}
+    
+    TASK: Read the uploaded file text and perform an exhaustive deep information extraction. Pull out all definitions, key historical dates, core concepts, formulas, and laws. 
+    
+    FORMAT RULES:
+    - Organize using neat Markdown bullet points and bold headers.
+    - For mathematical formulas, equations, matrices, or variable fractions, use beautiful, readable standard LaTeX tags ($...$ or $$...$$). Make numbers and step-by-step math breakdowns perfectly organized.
+    
+    Study Material:
+    {study_material}
+    """
+    
+    for target_model in ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-1.5-flash']:
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=target_model,
+                contents=prompt
+            )
+            return response.text
+        except Exception as e:
+            if any(err in str(
