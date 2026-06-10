@@ -6,6 +6,7 @@ from pypdf import PdfReader
 from youtube_transcript_api import YouTubeTranscriptApi
 from google import genai
 from google.genai import types
+from pydantic import BaseModel
 
 # --- PAGE CONFIGURATION ---
 st.set_page_config(
@@ -13,6 +14,14 @@ st.set_page_config(
     page_icon="🎮", 
     layout="centered"
 )
+
+# --- PYDANTIC BLUEPRINT MODELS ---
+# This serves as a solid structural contract for the AI's response schema
+class QuizQuestion(BaseModel):
+    question: str
+    options: list[str]
+    correct: str
+    explanation: str
 
 # --- INITIALIZE STATE VARIABLES ---
 if "api_key" not in st.session_state:
@@ -72,14 +81,7 @@ def generate_questions_with_ai(study_material, api_key):
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=list[dict](
-                    words={
-                        "question": str,
-                        "options": list[str],
-                        "correct": str,
-                        "explanation": str
-                    }
-                ),
+                response_schema=list[QuizQuestion], # Clean list blueprint declaration
             ),
         )
         return json.loads(response.text)
@@ -271,4 +273,4 @@ else:
             st.session_state.streak = 0
             st.session_state.answered = False
             st.rerun()
-  
+        
