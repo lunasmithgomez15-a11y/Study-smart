@@ -370,7 +370,7 @@ elif st.session_state.active_mode == "Reviewer":
     
     try:
         clean_topic_query = urllib.parse.quote(selected_path.replace("/", " "))
-    except NameError:
+    except Exception:
         clean_topic_query = "study+lesson"
         
     yt_search_url = f"https://www.youtube.com/results?search_query={clean_topic_query}+lesson+explanation"
