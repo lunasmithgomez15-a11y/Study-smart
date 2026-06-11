@@ -1,6 +1,6 @@
 streamlit
 pypdf
 youtube-transcript-api
-google-genai
+gemini-2.5-flash
 python-pptx
 python-docx
