@@ -10,6 +10,17 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
+# Try-except blocks to allow optional installations for Word and PowerPoint files
+try:
+    from docx import Document
+except ImportError:
+    Document = None
+
+try:
+    from pptx import Presentation
+except ImportError:
+    Presentation = None
+
 # --- GIZMO MODERN PREMIUM DARK THEME ---
 st.set_page_config(
     page_title="BrainCrunch Workspace Pro", 
@@ -31,7 +42,6 @@ st.markdown("""
         background-color: #0b0f19;
     }
     
-    /* Sleek Container Cards */
     .gizmo-card {
         background: #111827;
         border: 1px solid #1f2937;
@@ -41,7 +51,6 @@ st.markdown("""
         margin-bottom: 20px;
     }
     
-    /* Interactive Flashcards */
     .flashcard-box {
         background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
         color: white;
@@ -130,16 +139,34 @@ try:
 except Exception:
     pass
 
-# --- DOCUMENT PARSERS ---
+# --- UPGRADED MULTI-DOCUMENT FILE PARSERS ---
 def extract_text_from_file(file):
     filename = file.name.lower()
     text = ""
-    if filename.endswith(".pdf"):
-        reader = PdfReader(file)
-        for page in reader.pages:
-            text += page.extract_text() or ""
-    elif filename.endswith(".txt"):
-        text += file.read().decode("utf-8", errors="ignore")
+    try:
+        if filename.endswith(".pdf"):
+            reader = PdfReader(file)
+            for page in reader.pages:
+                text += page.extract_text() or ""
+        elif filename.endswith(".docx"):
+            if Document is not None:
+                doc = Document(io.BytesIO(file.read()))
+                text += "\n".join([para.text for para in doc.paragraphs])
+            else:
+                text += "Error: python-docx is not installed on this system environment."
+        elif filename.endswith(".pptx"):
+            if Presentation is not None:
+                prs = Presentation(io.BytesIO(file.read()))
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text"):
+                            text += shape.text + "\n"
+            else:
+                text += "Error: python-pptx is not installed on this system environment."
+        elif filename.endswith(".txt"):
+            text += file.read().decode("utf-8", errors="ignore")
+    except Exception as e:
+        st.error(f"Error parsing {file.name}: {e}")
     return text
 
 def get_youtube_id(url):
@@ -153,8 +180,69 @@ def get_youtube_transcript(video_id):
     except Exception:
         return None
 
-# --- HIGH-FIDELITY OFFLINE CONTEXT GENERATOR (NO EMOJIS PRE-INJECTED) ---
+# --- SMART NATIVE QUESTION DISCOVERY ENGINE ---
+def extract_native_questions_from_text(text):
+    """
+    Scans document text for actual pre-existing multiple choice questions
+    using regular expressions looking for numerical items and choice items.
+    """
+    found_questions = []
+    # Match strings like "1. What is..." or "Question 5:" followed by options like A), B), C), D)
+    pattern = r'(?:(?:Question\s*|\b)(\d+)[.:\s)]+)(.*?)(?=[A-D\d]+[.:\s)]+|$)'
+    
+    # Split text into chunks that look like standalone question blocks
+    blocks = re.split(r'\n(?=\d+[\s.)])', text)
+    
+    for block in blocks:
+        lines = [line.strip() for line in block.split('\n') if line.strip()]
+        if len(lines) < 2:
+            continue
+            
+        q_text = lines[0]
+        options = []
+        correct_answer = ""
+        
+        # Look for choice structures within lines
+        for line in lines[1:]:
+            opt_match = re.match(r'^[A-Da-d\s]*[.):\s]+(.*)', line)
+            if opt_match:
+                clean_opt = opt_match.group(1).strip()
+                # Check if the line explicitly claims to be correct or has markers
+                if any(mark in line.lower() for mark in ["(correct)", "*correct*", "ans:", "answer:"]):
+                    clean_opt = re.sub(r'(?i)\(*correct\)*|\*|ans:||answer:', '', clean_opt).strip()
+                    correct_answer = clean_opt
+                options.append(clean_opt)
+        
+        if len(options) >= 2:
+            if not q_text.strip().endswith('?'):
+                # Quick formatting fallback 
+                if "?" in q_text:
+                    parts = q_text.split('?')
+                    q_text = parts[0] + '?'
+            
+            if not correct_answer:
+                correct_answer = options[0] # Default fallback to first choice if unmarked
+                
+            # Clean options pool from leaking status badges beforehand
+            random.shuffle(options)
+            
+            found_questions.append({
+                "question": q_text,
+                "options": options,
+                "correct": correct_answer,
+                "explanation": "Extracted accurately from pre-existing questionnaire parameters located inside your uploaded file content."
+            })
+            
+    return found_questions
+
+# --- FALLBACK GENERATOR (IF FILE CONTAINS NO QUESTIONS) ---
 def generate_smart_fallback_questions(text, count):
+    # Try searching for real questions first inside the document text body
+    extracted = extract_native_questions_from_text(text)
+    if extracted:
+        return extracted[:count]
+        
+    # Standard generation fallback if text contains no questions
     clean_text = re.sub(r'\s+', ' ', text)
     sentences = [s.strip() for s in re.split(r'[.!?]', clean_text) if len(s.strip()) > 40]
     
@@ -169,18 +257,12 @@ def generate_smart_fallback_questions(text, count):
     questions = []
     for i in range(count):
         target_sentence = sentences[i % len(sentences)]
-        
-        # Pull separate factual chunks cleanly without appending formatting emojis
         other_sentences = [s for s in sentences if s != target_sentence]
         if len(other_sentences) < 3:
             other_sentences = sentences * 3
             
         correct_ans = target_sentence
-        wrong_1 = other_sentences[0]
-        wrong_2 = other_sentences[1]
-        wrong_3 = other_sentences[2]
-        
-        options_pool = [correct_ans, wrong_1, wrong_2, wrong_3]
+        options_pool = [correct_ans, other_sentences[0], other_sentences[1], other_sentences[2]]
         random.shuffle(options_pool)
         
         questions.append({
@@ -209,10 +291,15 @@ def generate_smart_fallback_flashcards(text):
 
 # --- PRODUCTION API HANDLERS ---
 def generate_questions_with_ai(study_material, num_questions):
+    # Always attempt a localized clean regex extraction scan first to save calls and respect existing test docs
+    native_questions = extract_native_questions_from_text(study_material)
+    if len(native_questions) >= 2:
+        return native_questions[:num_questions]
+
     if not st.session_state.api_key or len(st.session_state.api_key) < 10:
         return generate_smart_fallback_questions(study_material, num_questions)
         
-    prompt = f"Generate exactly {num_questions} reading comprehension multiple choice questions based on this text. Choices must be full, distinct contextual sentences from the text scope. Do not include answers, labels, or indicators in the options array. Text:\n{study_material}"
+    prompt = f"First, scan the text below to see if there are already multiple-choice questions present. If you find any, extract and return them in clean formatting. If no questions are found, create exactly {num_questions} clear questions directly from the document's concepts. Do not append any emojis or validation checkmarks inside the options list. Text:\n{study_material}"
     try:
         client = genai.Client(api_key=st.session_state.api_key)
         response = client.models.generate_content(
@@ -264,19 +351,19 @@ with st.sidebar:
     output_type = st.radio("Target Element:", ["Gizmo Flashcards AI", "Gamified Performance Quizzes"])
     
     if output_type == "Gamified Performance Quizzes":
-        question_count = st.slider("🎯 Select Number of Questions:", min_value=3, max_value=25, value=5, step=1)
+        question_count = st.slider("🎯 Max Questions to Load:", min_value=3, max_value=25, value=5, step=1)
         
     st.write("---")
     creation_method = st.radio("Creation Style:", ["🤖 Automatically from Source", "✍️ Manually Create Cards"])
     
     if creation_method == "🤖 Automatically from Source":
-        input_mode = st.radio("Input Source Channel:", ["Upload Files (PDF, TXT)", "YouTube Video Link"])
+        input_mode = st.radio("Input Source Channel:", ["Upload Files (PDF, DOCX, PPTX, TXT)", "YouTube Video Link"])
         study_text = ""
         run_generation = False
         
-        if input_mode == "Upload Files (PDF, TXT)":
-            uploaded_files = st.file_uploader("Drop study docs here:", type=["pdf", "txt"], accept_multiple_files=True)
-            if uploaded_files and st.button("🚀 Process & Generate Set", use_container_width=True):
+        if input_mode == "Upload Files (PDF, DOCX, PPTX, TXT)":
+            uploaded_files = st.file_uploader("Drop study docs here:", type=["pdf", "txt", "docx", "pptx"], accept_multiple_files=True)
+            if uploaded_files and st.button("🚀 Process & Parse Material", use_container_width=True):
                 for f in uploaded_files:
                     study_text += extract_text_from_file(f) + "\n"
                 run_generation = True
@@ -290,7 +377,7 @@ with st.sidebar:
                     run_generation = True
 
         if run_generation and study_text.strip():
-            with st.spinner("Synthesizing context strings..."):
+            with st.spinner("Analyzing document structure..."):
                 if output_type == "Gamified Performance Quizzes":
                     res = generate_questions_with_ai(study_text, question_count)
                     if res:
