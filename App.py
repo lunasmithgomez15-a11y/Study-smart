@@ -4,437 +4,483 @@ import random
 import io
 import os
 import streamlit as st
-from pypdf import PdfReader
-from youtube_transcript_api import YouTubeTranscriptApi
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
 
-# --- PACKAGES COMPATIBILITY PROTECTION ---
+# --- SAFETY WRAPPERS FOR OPTIONAL LIBRARIES ---
 try:
-    from docx import Document
+    from pypdf import PdfReader
 except ImportError:
-    Document = None
+    PdfReader = None
 
-try:
-    from pptx import Presentation
-except ImportError:
-    Presentation = None
-
-# --- UI CONFIGURATION & THEME DESIGN ---
+# --- UI INITIALIZATION & PLATFORM STYLING ---
 st.set_page_config(
-    page_title="BrainCrunch Workspace Pro", 
-    page_icon="🧠", 
+    page_title="StudySmart Pro AI", 
+    page_icon="⚡", 
     layout="centered"
 )
 
-# Custom Space Dark UI styling to prevent element truncation
+# Custom responsive CSS design matching premium gamified mobile study apps
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght=400;500;600;700&display=swap');
     
     html, body, [class*="css"] {
         font-family: 'Plus Jakarta Sans', sans-serif;
-        background-color: #0b0f19;
-        color: #f1f5f9;
+        background-color: #f8fafc;
+        color: #0f172a;
     }
     
     .stApp {
-        background-color: #0b0f19;
+        background-color: #f8fafc;
     }
     
-    .gizmo-card {
-        background: #111827;
-        border: 1px solid #1f2937;
-        border-radius: 16px;
-        padding: 24px;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
-        margin-bottom: 20px;
+    .mobile-container {
+        max-width: 480px;
+        margin: 0 auto;
+        padding: 8px;
     }
     
-    .flashcard-box {
-        background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
-        color: white;
+    .app-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 4px;
+        margin-bottom: 10px;
+    }
+    
+    .deck-badge {
+        font-size: 14px;
+        font-weight: 700;
+        color: #0284c7;
+        background: #e0f2fe;
+        padding: 6px 14px;
         border-radius: 20px;
-        padding: 50px 24px;
-        text-align: center;
-        min-height: 220px;
+    }
+    
+    .game-stats-bar {
+        display: flex;
+        gap: 16px;
+        margin-bottom: 20px;
+        padding: 0 4px;
+    }
+    
+    .stat-pill {
         display: flex;
         align-items: center;
-        justify-content: center;
-        font-size: 22px;
-        font-weight: 600;
-        margin: 20px 0;
-        border: 1px solid rgba(255,255,255,0.1);
-    }
-    
-    .flashcard-back {
-        background: linear-gradient(135deg, #059669 0%, #065f46 100%) !important;
-    }
-    
-    .studio-title {
-        background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        text-align: center;
+        gap: 6px;
         font-weight: 700;
-        margin-bottom: 25px;
+        font-size: 15px;
     }
     
-    [data-testid="stSidebar"] {
-        background-color: #070a13 !important;
-        border-right: 1px solid #1f2937;
+    .pill-key { color: #eab308; }
+    .pill-heart { color: #ef4444; }
+    .pill-xp { 
+        margin-left: auto; 
+        background: #e2e8f0; 
+        color: #475569; 
+        padding: 4px 12px; 
+        border-radius: 12px;
+        font-size: 13px;
     }
+    
+    .question-box {
+        background: #ffffff;
+        border-radius: 24px;
+        padding: 24px;
+        box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
+        border: 1px solid #e2e8f0;
+        margin-bottom: 24px;
+    }
+    
+    .card-tag {
+        color: #22c55e;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+    }
+    
+    .question-main-text {
+        font-size: 18px;
+        font-weight: 700;
+        line-height: 1.5;
+        color: #0f172a;
+    }
+    
+    .hero-section {
+        text-align: center;
+        padding: 40px 10px;
+    }
+    
+    .hero-text {
+        font-size: 26px;
+        font-weight: 800;
+        color: #0f172a;
+        margin-top: 12px;
+    }
+    
+    .search-mock {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 20px;
+        padding: 16px;
+        color: #94a3b8;
+        font-size: 15px;
+        margin-bottom: 24px;
+    }
+    
+    .deck-row-item {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        padding: 16px;
+        margin-bottom: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .border-blue { border-left: 5px solid #3b82f6; }
+    .border-teal { border-left: 5px solid #14b8a6; }
+    
+    /* Interactive Choice Buttons Formatting Override */
+    div.stButton > button {
+        background-color: #ffffff !important;
+        color: #0f172a !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 16px !important;
+        padding: 14px 20px !important;
+        font-size: 15px !important;
+        font-weight: 500 !important;
+        text-align: left !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.01) !important;
+        width: 100%;
+        transition: all 0.2s ease;
+    }
+    
+    div.stButton > button:hover {
+        border-color: #cbd5e1 !important;
+        background-color: #f8fafc !important;
+    }
+    
+    /* Utility Pills Design Override */
+    .utility-pill button {
+        background-color: #e2e8f0 !important;
+        border-radius: 20px !important;
+        font-weight: 600 !important;
+        text-align: center !important;
+        padding: 8px 16px !important;
+    }
+    
+    .footer-navigation {
+        display: flex;
+        justify-content: space-around;
+        padding: 16px 0;
+        background: #ffffff;
+        border-top: 1px solid #e2e8f0;
+        margin-top: 60px;
+    }
+    
+    .footer-tab {
+        text-align: center;
+        font-size: 11px;
+        color: #94a3b8;
+        font-weight: 600;
+    }
+    .footer-tab.active { color: #3b82f6; }
     </style>
 """, unsafe_allow_html=True)
 
-STORAGE_FILE = "storage.json"
+# --- STRICT SCHEMA STRUCTURING ENFORCEMENT ---
+# This replicates Gizmo's core processing loop: it prevents the AI from returning broken arrays or numbers as questions.
+class EnforcedQuizQuestion(BaseModel):
+    question: str = Field(description="The actual full conceptual question string extracted or created from the text.")
+    options: list[str] = Field(description="Exactly 3 unique, short, independent alternative answer choice variations.")
+    correct: str = Field(description="The exact character matching variant present inside the options array list.")
+    explanation: str = Field(description="A comprehensive sentence clearing up why this fact is correct.")
 
-def load_local_storage():
-    if os.path.exists(STORAGE_FILE):
-        try:
-            with open(STORAGE_FILE, "r", encoding="utf-8") as f:
-                content = f.read().strip()
-                return json.loads(content) if content else {}
-        except Exception:
-            return {}
-    return {}
+# --- STATE MACHINE ARCHITECTURE ---
+if "state_machine" not in st.session_state:
+    st.session_state.state_machine = {
+        "current_screen": "DASHBOARD",  # DASHBOARD, DECK_PREVIEW, PLAYING, END_SCREEN
+        "active_deck_title": "",
+        "questions_pool": [],
+        "current_index": 0,
+        "keys": 5,
+        "hearts": 15,
+        "xp": 0,
+        "selected_option": None,
+        "answered_status": False,
+        "show_explanation_drawer": False
+    }
 
-def save_local_storage(data):
-    try:
-        with open(STORAGE_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        st.error(f"Storage System Error: {e}")
+sm = st.session_state.state_machine
 
-# --- STRICT SCHEMA ENFORCEMENT MODELS ---
-# This guarantees that the AI cannot generate blank questions or dummy array values.
-class QuizQuestion(BaseModel):
-    question: str = Field(description="The complete, informative exam question text. Must not be empty or a single number.")
-    options: list[str] = Field(description="Exactly 4 distinct multiple-choice options related to the text.")  
-    correct: str = Field(description="The exact text string matching one of the correct choices inside the options list.")       
-    explanation: str = Field(description="A descriptive context sentence breaking down why the option is logically correct.")
-
-class FlashcardItem(BaseModel):
-    concept_or_term: str = Field(description="The main academic title or key word.")
-    definition_or_context: str = Field(description="The core description, system rule, or factual meaning.")
-
-# --- STATE LIFECYCLE MANAGEMENT ---
-session_vars = {
-    "api_key": "", "questions": [], "flashcards": [], 
-    "active_mode": "Welcome", "current_index": 0, "score": 0, 
-    "answered": False, "selected_option": None, "reveal_card": False,
-    "temp_selection": None
+# --- SECURE BUILT-IN BACKUP DECK REPOSITORY ---
+MOCK_DATABASE = {
+    "DOST Exam Reviewer": [
+        {"question": "What logical conclusion can be drawn from the statement: 'Some actors are singers, and all singers are dancers'?", "options": ["Some actors are dancers", "All actors are dancers", "No actors can be dancers"], "correct": "Some actors are dancers", "explanation": "Since the entire group of singers is enclosed inside dancers, any actor who is a singer is also a dancer."},
+        {"question": "Which historic scientist is credited with developing infinitesimal calculus independently during the 17th century?", "options": ["Sir Isaac Newton", "Albert Einstein", "Nikola Tesla"], "correct": "Sir Isaac Newton", "explanation": "Sir Isaac Newton developed calculus alongside Gottfried Wilhelm Leibniz during the late 1600s."},
+        {"question": "What specific ability is evaluated by comprehensive Verbal Reasoning examinations?", "options": ["Analyze, interpret, and logically process text data", "Memorize complicated formulas perfectly", "Perform speed-reading sequences on simple words"], "correct": "Analyze, interpret, and logically process text data", "explanation": "Verbal reasoning measures constructive logic rather than simple word memorization patterns."}
+    ],
+    "NAT Core Math": [
+        {"question": "What occurs when two linear equations share identical slopes but maintain different y-intercepts?", "options": ["They are parallel and never intersect", "They overlap perfectly on all coordinate sets", "They cross perpendicularly at the coordinate origin"], "correct": "They are parallel and never intersect", "explanation": "Identical slopes mean the lines travel in the exact same direction, meaning they can never cross."}
+    ]
 }
-for key, val in session_vars.items():
-    if key not in st.session_state:
-        st.session_state[key] = val
 
-if "nested_folders" not in st.session_state:
-    st.session_state.nested_folders = load_local_storage()
+# --- DOCUMENT PARSING METHODS ---
+def read_uploaded_files(files):
+    text_content = ""
+    for f in files:
+        if f.name.lower().endswith(".pdf") and PdfReader:
+            try:
+                pdf_reader = PdfReader(f)
+                for page in pdf_reader.pages:
+                    text_content += page.extract_text() or ""
+            except Exception:
+                pass
+        else:
+            text_content += f.read().decode("utf-8", errors="ignore") + "\n"
+    return text_content
 
-# Dynamic secrets loading checks
-if hasattr(st, "secrets") and "gemini" in st.secrets:
-    if not st.session_state.api_key:
-        st.session_state.api_key = st.secrets["gemini"]["api_key"]
-
-# --- CORE DOCUMENT EXTRACTORS ---
-def extract_text_from_file(file):
-    filename = file.name.lower()
-    text = ""
-    try:
-        if filename.endswith(".pdf"):
-            reader = PdfReader(file)
-            for page in reader.pages:
-                text += page.extract_text() or ""
-        elif filename.endswith(".docx") and Document:
-            doc = Document(io.BytesIO(file.read()))
-            text += "\n".join([para.text for para in doc.paragraphs])
-        elif filename.endswith(".pptx") and Presentation:
-            prs = Presentation(io.BytesIO(file.read()))
-            for slide in prs.slides:
-                for shape in slide.shapes:
-                    if hasattr(shape, "text"):
-                        text += shape.text + "\n"
-        elif filename.endswith(".txt"):
-            text += file.read().decode("utf-8", errors="ignore")
-    except Exception as e:
-        st.error(f"Error reading file {file.name}: {e}")
-    return text
-
-def get_youtube_id(url):
-    match = re.search(r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})', url)
-    return match.group(1) if match else None
-
-def get_youtube_transcript(video_id):
-    try:
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-        return " ".join([item['text'] for item in transcript_list])
-    except Exception:
-        return None
-
-# --- INTELLIGENT COMPREHENSION EXTRACTION ENGINE ---
-def intelligent_quiz_synthesis(study_material, num_questions):
-    if not st.session_state.api_key or len(st.session_state.api_key) < 10:
-        st.error("⚠️ Active Gemini API Key required to generate items without placeholder text fallback layers.")
-        return structural_fallback_extractor(study_material, num_questions)
+def run_ai_quiz_generation(text_material):
+    # Checks if secret configurations exist inside your server pipeline safely
+    if not hasattr(st, "secrets") or "gemini" not in st.secrets:
+        return client_side_fallback_parser(text_material)
         
-    prompt = f"""
-    You are an expert exam engine parsing educational study material.
-    
-    CORE TARGET OBJECTIVES:
-    1. Carefully scan the provided text and formulate exactly {num_questions} clear, deep-context multiple-choice questions.
-    2. Do NOT use blank questions, numbers as questions, or fallback text values like "Context option variable padding".
-    3. Generate 4 unique, context-specific options based directly on the provided study material. 
-    4. If the text mentions specific mathematical coordinate lists or historical facts, make sure those are explicitly spelled out in the options.
-    
-    SOURCE MATERIAL:
-    {study_material}
-    """
     try:
-        client = genai.Client(api_key=st.session_state.api_key)
+        client = genai.Client(api_key=st.secrets["gemini"]["api_key"])
         response = client.models.generate_content(
             model='gemini-2.5-flash',
-            contents=prompt,
+            contents=f"Analyze this material and create an advanced multi-choice quiz stack:\n{text_material}",
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
-                response_schema=list[QuizQuestion],
-                temperature=0.3,
-            ),
+                response_schema=list[EnforcedQuizQuestion],
+                temperature=0.3
+            )
         )
         return json.loads(response.text)
-    except Exception as e:
-        st.warning(f"AI Engine Error, applying robust backup parsing strategy: {e}")
-        return structural_fallback_extractor(study_material, num_questions)
+    except Exception:
+        return client_side_fallback_parser(text_material)
 
-# --- BACKUP CONTEXTUAL GENERATOR ---
-def structural_fallback_extractor(text, count):
-    # This acts as a reliable fallback loop to clean up messy text segments if the API keys hit a rate limit
+def client_side_fallback_parser(text):
+    # This matches the Gizmo logic: it instantly cleans up raw text strings to prevent errors if the API hits a network limit
     clean_text = re.sub(r'\s+', ' ', text)
-    sentences = [s.strip() for s in re.split(r'[.!?]', clean_text) if len(s.strip()) > 40]
+    sentences = [s.strip() for s in re.split(r'[.!?]', clean_text) if len(s.strip()) > 45]
     
-    if len(sentences) < 3:
-        sentences = [
-            "Danao City municipal frameworks track localized history, infrastructure data, and political leadership records.",
-            "Algebraic formulations involve solving for variables by isolating system matrices dynamically."
-        ]
+    if len(sentences) < 2:
+        return MOCK_DATABASE["DOST Exam Reviewer"]
         
-    fallback_set = []
-    for i in range(min(count, len(sentences))):
+    results = []
+    for i in range(min(5, len(sentences))):
         fact = sentences[i]
-        opts = [
-            fact,
-            "Alternative procedural system option tracking variant.",
-            "Secondary configuration parameters missing verification variables.",
-            "Independent modification elements omitting critical historical details."
-        ]
-        random.shuffle(opts)
-        fallback_set.append({
-            "question": f"Based on the processed study documentation, which statement accurately reflects verified entries?",
-            "options": opts,
+        results.append({
+            "question": f"Based on the processed study file, which statement represents a verified factual point?",
+            "options": [fact, "An alternative incorrect evaluation statement.", "A secondary parameter choice omitting baseline data."],
             "correct": fact,
-            "explanation": f"The source text explicitly documents: '{fact}'"
+            "explanation": f"The source text directly explicitly confirms: '{fact}'"
         })
-    return fallback_set
+    return results
 
-def generate_flashcards_with_ai(study_material):
-    if not st.session_state.api_key or len(st.session_state.api_key) < 10:
-        clean_text = re.sub(r'\s+', ' ', study_material)
-        sentences = [s.strip() for s in re.split(r'[.!?]', clean_text) if len(s.strip()) > 30]
-        return [{"concept_or_term": f"🔍 Key Concept {idx+1}", "definition_or_context": item} for idx, item in enumerate(sentences[:10])]
-        
-    prompt = f"Extract core structural items, vocabulary, or systems into clean structured flashcards:\n{study_material}"
-    try:
-        client = genai.Client(api_key=st.session_state.api_key)
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=list[FlashcardItem],
-            ),
-        )
-        return json.loads(response.text)
-    except Exception:
-        return [{"concept_or_term": "Concept Anchor", "definition_or_context": "Baseline study reference data."}]
-
-# --- APPLICATION WORKSPACE NAVIGATION ---
-st.markdown("<h1 class='studio-title'>🧠 BrainCrunch Studio</h1>", unsafe_allow_html=True)
-
-with st.sidebar:
-    st.markdown("### ⚙️ Workspace Configuration")
-    user_role = st.selectbox("Current Profile:", ["Student Mode", "Admin / Creator Mode"])
-    
-    if user_role == "Admin / Creator Mode":
-        st.session_state.api_key = st.text_input("System API Key Override:", value=st.session_state.api_key, type="password")
-            
-    st.write("---")
-    st.markdown("### 🛠️ Study Mode Strategy")
-    output_type = st.radio("Target Element:", ["Gizmo Flashcards AI", "Gamified Performance Quizzes"])
-    
-    if output_type == "Gamified Performance Quizzes":
-        question_count = st.slider("🎯 Load Question Limit:", min_value=3, max_value=20, value=5, step=1)
-        
-    st.write("---")
-    input_mode = st.radio("Input Source Channel:", ["Upload Study Files", "YouTube Video Link"])
-    study_text = ""
-    run_generation = False
-    
-    if input_mode == "Upload Study Files":
-        uploaded_files = st.file_uploader("Drop study docs here:", type=["pdf", "txt", "docx", "pptx"], accept_multiple_files=True)
-        if uploaded_files and st.button("🚀 Process & Parse Material", use_container_width=True):
-            for f in uploaded_files:
-                study_text += extract_text_from_file(f) + "\n"
-            run_generation = True
-            
-    elif input_mode == "YouTube Video Link":
-        yt_url = st.text_input("Paste YouTube URL Link:")
-        if yt_url and st.button("🚀 Gather Video Transcripts", use_container_width=True):
-            vid = get_youtube_id(yt_url)
-            if vid:
-                study_text = get_youtube_transcript(vid)
-                run_generation = True
-
-    if run_generation and study_text.strip():
-        with st.spinner("Analyzing text layout patterns..."):
-            if output_type == "Gamified Performance Quizzes":
-                res = intelligent_quiz_synthesis(study_text, question_count)
-                if res:
-                    st.session_state.questions = res
-                    st.session_state.active_mode = "Quiz"
-                    st.session_state.current_index = 0
-                    st.session_state.score = 0
-                    st.session_state.answered = False
-                    st.session_state.temp_selection = None
-                    st.rerun()
-            else:
-                res = generate_flashcards_with_ai(study_text)
-                if res:
-                    st.session_state.flashcards = res
-                    st.session_state.active_mode = "Flashcards"
-                    st.session_state.current_index = 0
-                    st.session_state.reveal_card = False
-                    st.rerun()
-
-    st.write("---")
-    st.markdown("### 🗂️ Cabinet Quick-Load")
-    if st.session_state.nested_folders:
-        active_track = st.selectbox("Saved Folders:", list(st.session_state.nested_folders.keys()))
-        if st.button("📥 Retrieve Saved Set", use_container_width=True):
-            saved_meta = st.session_state.nested_folders[active_track]
-            if saved_meta["type"] == "Quiz":
-                st.session_state.questions = saved_meta["data"]
-                st.session_state.active_mode = "Quiz"
-            else:
-                st.session_state.flashcards = saved_meta["data"]
-                st.session_state.active_mode = "Flashcards"
-            st.session_state.current_index = 0
-            st.session_state.score = 0
-            st.session_state.answered = False
-            st.session_state.temp_selection = None
-            st.rerun()
-
-# --- MAIN MAIN INTERFACE RENDERER ---
-if st.session_state.active_mode == "Welcome":
+# --- SCREEN CONTROLLER: HOME DASHBOARD ---
+if sm["current_screen"] == "DASHBOARD":
     st.markdown("""
-    <div class='gizmo-card' style='text-align: center; border-top: 4px solid #6366f1;'>
-        <h3 style='margin-top:0; color: #ffffff;'>👋 Welcome to BrainCrunch Studio</h3>
-        <p style='color: #9ca3af;'>Upload your study material or drop a YouTube link in the sidebar to generate custom quizzes and flashcards safely!</p>
+    <div class="mobile-container">
+        <div class="hero-section">
+            <img src="https://fonts.gstatic.com/s/e/notoemoji/latest/1f98b/512.webp" width="75" height="75">
+            <h2 class="hero-text">What shall we study?</h2>
+        </div>
+        <div class="search-mock">Search study sets, topics... 🔍</div>
     </div>
     """, unsafe_allow_html=True)
+    
+    # Material Creator Utility Portal
+    with st.expander("📥 Drag & Drop Material to Create Custom Sets"):
+        uploaded_files = st.file_uploader("Upload files (.pdf, .txt)", accept_multiple_files=True)
+        if uploaded_files and st.button("🚀 Process & Generate Quiz Set", use_container_width=True):
+            with st.spinner("Analyzing data schemas..."):
+                extracted_data = read_uploaded_files(uploaded_files)
+                new_quiz = run_ai_quiz_generation(extracted_data)
+                if new_quiz:
+                    MOCK_DATABASE["Custom Generated Deck"] = new_quiz
+                    sm["active_deck_title"] = "Custom Generated Deck"
+                    sm["questions_pool"] = new_quiz
+                    sm["current_screen"] = "DECK_PREVIEW"
+                    st.rerun()
 
-elif st.session_state.active_mode == "Flashcards":
-    idx = st.session_state.current_index
-    if idx < len(st.session_state.flashcards):
-        card = st.session_state.flashcards[idx]
-        st.markdown(f"<p style='color:#9ca3af; font-weight:600; text-align:right;'>🏷️ Card: {idx+1} / {len(st.session_state.flashcards)}</p>", unsafe_allow_html=True)
+    st.write("")
+    st.markdown("### Active Decks")
+    
+    # Render Core Topic Iterations
+    available_decks = [("DOST Exam Reviewer", "3 Active Modules", "border-blue"), ("NAT Core Math", "1 Module Load", "border-teal")]
+    if "Custom Generated Deck" in MOCK_DATABASE:
+        available_decks.insert(0, ("Custom Generated Deck", "AI Extracted Set", "border-blue"))
         
-        if not st.session_state.reveal_card:
-            st.markdown(f"<div class='flashcard-box'>{card['concept_or_term']}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown(f"<div class='flashcard-box flashcard-back'>{card['definition_or_context']}</div>", unsafe_allow_html=True)
-            
-        col_f1, col_f2 = st.columns(2)
-        with col_f1:
-            if st.button("🔄 Flip Card", use_container_width=True):
-                st.session_state.reveal_card = not st.session_state.reveal_card
+    for name, subtitle, style_class in available_decks:
+        col_txt, col_act = st.columns([4, 1])
+        with col_txt:
+            st.markdown(f"""
+            <div class="deck-row-item {style_class}" style="margin-bottom:0; height:68px; display:flex; align-items:center;">
+                <div>
+                    <b style="color:#0f172a; font-size:15px;">{name}</b><br>
+                    <span style="color:#64748b; font-size:13px;">{subtitle}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        with col_act:
+            st.write("")
+            if st.button("Open", key=f"open_deck_{name}"):
+                sm["active_deck_title"] = name
+                sm["questions_pool"] = MOCK_DATABASE[name] if name != "Custom Generated Deck" else MOCK_DATABASE["Custom Generated Deck"]
+                sm["current_screen"] = "DECK_PREVIEW"
                 st.rerun()
-        with col_f2:
-            if st.button("Next Card ➡️", use_container_width=True):
-                st.session_state.current_index += 1
-                st.session_state.reveal_card = False
-                st.rerun()
-    else:
-        st.success("🎉 You've reviewed all flashcards!")
-        if st.button("🏠 Return Home", use_container_width=True):
-            st.session_state.active_mode = "Welcome"
-            st.rerun()
 
-elif st.session_state.active_mode == "Quiz":
-    idx = st.session_state.current_index
-    if idx < len(st.session_state.questions):
-        q_item = st.session_state.questions[idx]
+# --- SCREEN CONTROLLER: DECK SELECTION PREVIEW ---
+elif sm["current_screen"] == "DECK_PREVIEW":
+    st.markdown(f"""
+    <div class="app-header">
+        <div class="deck-badge">📁 {sm['active_deck_title']}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.button("⬅️ Back to Main Dashboard"):
+        sm["current_screen"] = "DASHBOARD"
+        st.rerun()
         
-        col_h1, col_h2 = st.columns(2)
-        with col_h1:
-            st.markdown(f"Running Score: <b style='color:#6366f1; font-size:20px;'>{st.session_state.score}</b> Pts", unsafe_allow_html=True)
-        with col_h2:
-            st.markdown(f"<p style='text-align:right; color:#9ca3af;'>Question: <b>{idx+1}/{len(st.session_state.questions)}</b></p>", unsafe_allow_html=True)
-            
-        st.progress((idx) / len(st.session_state.questions))
-        st.write("---")
-        
-        st.markdown(f"<div class='gizmo-card'><p style='font-size: 18px; line-height: 1.6; margin: 0;'>{q_item['question']}</p></div>", unsafe_allow_html=True)
-        st.write("")
-        
-        selected_radio = st.radio(
-            "Choose your option answer variant:", 
-            options=q_item['options'], 
-            index=None if st.session_state.temp_selection is None else q_item['options'].index(st.session_state.temp_selection),
-            disabled=st.session_state.answered,
-            key=f"quiz_radio_final_{idx}"
-        )
-        
-        if selected_radio:
-            st.session_state.temp_selection = selected_radio
+    st.write("---")
+    st.markdown(f"### Undergraduate Assessment modules ({len(sm['questions_pool'])} cards loaded)")
+    
+    st.markdown(f"""
+    <div class="deck-row-item border-blue">
+        <div>
+            <b style="font-size:15px; color:#1e293b;">Active Learning Subdeck Alpha</b><br>
+            <span style="font-size:13px; color:#64748b;">Complete standard interactive choice format options</span>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.write("")
+    if st.button("🎮 Start Study Session", use_container_width=True):
+        sm["current_screen"] = "PLAYING"
+        sm["current_index"] = 0
+        sm["selected_option"] = None
+        sm["answered_status"] = False
+        sm["show_explanation_drawer"] = False
+        st.rerun()
 
-        st.write("")
+# --- SCREEN CONTROLLER: LIVE SYSTEM GAMEPLAY ---
+elif sm["current_screen"] == "PLAYING":
+    pool = sm["questions_pool"]
+    idx = sm["current_index"]
+    
+    if idx < len(pool):
+        current_card = pool[idx]
         
-        if not st.session_state.answered:
-            if st.button("📥 Submit Answer Selection", use_container_width=True, disabled=(st.session_state.temp_selection is None)):
-                st.session_state.answered = True
-                st.session_state.selected_option = st.session_state.temp_selection
-                if st.session_state.selected_option == q_item['correct']:
-                    st.session_state.score += 10
+        # Game Metric Counters Subsystem Header Layout
+        st.markdown(f"""
+        <div class="app-header">
+            <div class="deck-badge">⭐ Review Module</div>
+        </div>
+        <div class="game-stats-bar">
+            <span class="stat-pill pill-key">🔑 {sm['keys']}</span>
+            <span class="stat-pill pill-heart">❤️ {sm['hearts']}</span>
+            <span class="stat-xp">+{sm['xp']} XP</span>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Native Progression Visualizer 
+        st.progress((idx + 1) / len(pool))
+        
+        # Primary Structural Card Frame Ingestion
+        st.markdown(f"""
+        <div class="question-box">
+            <div class="card-tag">Question {idx + 1} of {len(pool)}</div>
+            <div class="question-main-text">{current_card['question']}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Option Selection Evaluation Loop
+        for option_variant in current_card['options']:
+            if st.button(option_variant, key=f"choice_node_{idx}_{option_variant}", disabled=sm["answered_status"]):
+                sm["selected_option"] = option_variant
+                sm["answered_status"] = True
+                if option_variant == current_card['correct']:
+                    sm["xp"] += 15
+                else:
+                    sm["hearts"] = max(0, sm["hearts"] - 1)
                 st.rerun()
                 
-        if st.session_state.answered:
-            if st.session_state.selected_option == q_item['correct']:
-                st.success(f"🎯 Correct Response Selected!")
-            else:
-                st.error(f"❌ Target Answer was: {q_item['correct']}")
-                
-            st.info(f"💡 **Context Breakdown:** {q_item['explanation']}")
+        # Interactive Real-Time Evaluation Validation Message Boxes
+        if sm["answered_status"]:
             st.write("---")
-            
+            if sm["selected_option"] == current_card['correct']:
+                st.success("🎯 Correct! Splendid operational choice.")
+            else:
+                st.error(f"❌ Incorrect. The accurate target factual point was: {current_card['correct']}")
+                
+            if sm["show_explanation_drawer"]:
+                st.info(f"💡 **Conceptual Logic:** {current_card['explanation']}")
+                
+            # Functional Action Panel Drawer Buttons Layout
+            col_key, col_rev, col_expl = st.columns(3)
+            with col_key:
+                st.markdown('<div class="utility-pill">', unsafe_allow_html=True)
+                if st.button("🔑 Hint", key="action_hint"):
+                    st.toast("Think about the primary context mentioned in the source paragraphs!")
+                st.markdown('</div>', unsafe_allow_html=True)
+            with col_rev:
+                st.markdown('<div class="utility-pill">', unsafe_allow_html=True)
+                if st.button("👁️ Reveal", key="action_reveal"):
+                    sm["selected_option"] = current_card['correct']
+                    st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+            with col_expl:
+                st.markdown('<div class="utility-pill">', unsafe_allow_html=True)
+                if st.button("🔮 Explain", key="action_explain"):
+                    sm["show_explanation_drawer"] = True
+                    st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+            st.write("")
             if st.button("Advance to Next Concept ➡️", use_container_width=True):
-                st.session_state.current_index += 1
-                st.session_state.answered = False
-                st.session_state.selected_option = None
-                st.session_state.temp_selection = None
+                if sm["hearts"] <= 0:
+                    sm["current_screen"] = "END_SCREEN"
+                else:
+                    sm["current_index"] += 1
+                    sm["selected_option"] = None
+                    sm["answered_status"] = False
+                    sm["show_explanation_drawer"] = False
                 st.rerun()
     else:
-        st.balloons()
-        st.markdown("<div class='gizmo-card' style='text-align:center;'><h3>🏆 Evaluation Session Finished!</h3></div>", unsafe_allow_html=True)
-        st.metric("Total Evaluation Score:", f"{st.session_state.score} Pts")
-        
-        st.write("---")
-        save_path = st.text_input("Name folder to save quiz set:", value="My Custom Quiz")
-        if st.button("💾 Archive Quiz to Storage", use_container_width=True):
-            st.session_state.nested_folders[save_path] = {"type": "Quiz", "data": st.session_state.questions}
-            save_local_storage(st.session_state.nested_folders)
-            st.toast("Archived successfully!")
-            
-        if st.button("🏠 Back to Home Screen", use_container_width=True):
-            st.session_state.active_mode = "Welcome"
-            st.rerun()
+        sm["current_screen"] = "END_SCREEN"
+        st.rerun()
+
+# --- SCREEN CONTROLLER: REWARD EVALUATION END SCREEN ---
+elif sm["current_screen"] == "END_SCREEN":
+    st.markdown("""
+    <div class="question-box" style="text-align:center; padding:40px 20px;">
+        <h2 style="color:#22c55e; margin-bottom:12px;">🏆 Session Finished!</h2>
+        <p style="color:#475569; font-size:16px;">Your training loop has logged all tracking parameters accurately.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.metric(label="Total Score Output", value=f"{sm['xp']} XP Points")
+    
+    st.write("")
+    if st.button("🏠 Return to Home Dashboard", use_container_width=True):
+        sm["current_screen"] = "DASHBOARD"
+        st.rerun()
+
+# --- STRUCTURAL APP SYSTEM UTILITY NAVIGATION BAR FOOTER ---
+st.markdown("""
+    <div class="footer-navigation">
+        <div class="footer-tab active">🏠<br>Home</div>
+        <div class="footer-tab">🔥<br>Streak</div>
+        <div class="footer-tab">➕<br>Add</div>
+        <div class="footer-tab">🗂️<br>Decks</div>
+        <div class="footer-tab">👤<br>Profile</div>
+    </div>
+""", unsafe_allow_html=True)
