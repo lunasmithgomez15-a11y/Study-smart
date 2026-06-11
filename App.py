@@ -164,7 +164,6 @@ def get_youtube_transcript(video_id):
 # --- LOCAL NO-INTERNET/FALLBACK PARSERS ---
 def fallback_local_quiz_builder(text, num_questions):
     """Generates an immediate review quiz locally from raw text strings when offline."""
-    # Find meaningful structural sentences or words containing definition markers
     sentences = re.split(r'(?<=[.!?])\s+', text)
     valid_facts = []
     
@@ -174,7 +173,6 @@ def fallback_local_quiz_builder(text, num_questions):
             valid_facts.append(s_clean)
             
     if len(valid_facts) < 3:
-        # Emergency slice fallback if document has minimal punctuation structure
         words = [w for w in text.split() if len(w) > 4]
         if len(words) >= 10:
             valid_facts = [f"Identify the context clues regarding standard operational definitions for: '{words[i]}'." for i in range(min(5, len(words)))]
@@ -186,7 +184,6 @@ def fallback_local_quiz_builder(text, num_questions):
     selected_facts = random.sample(valid_facts, sample_size) if len(valid_facts) >= sample_size else valid_facts
 
     for i, fact in enumerate(selected_facts):
-        # Extract context words to make multi-choice options
         words = [w.strip(",.()\"") for w in fact.split() if len(w) > 4 and w.lower() not in ["which", "there", "their", "about", "under"]]
         keyword = words[0] if words else "Concept"
         
@@ -252,6 +249,7 @@ def build_docx_bytes(markdown_text):
 
 # --- DEEP AI CORE ENGINES (PRO -> FLASH FALLBACK WITH OVERLOAD PROTECTION) ---
 def generate_questions_with_ai(study_material, api_key, num_questions, persona, language):
+    # SILENT RETURN: No errors are thrown onto the UI if empty
     if not api_key:
         return None
 
@@ -283,13 +281,12 @@ def generate_questions_with_ai(study_material, api_key, num_questions, persona, 
                 ),
             )
             return json.loads(response.text)
-        except Exception as e:
-            if any(err in str(e).upper() for err in ["503", "429", "404", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "NOT_FOUND"]):
-                continue
-            return None
+        except Exception:
+            continue
     return None
 
 def generate_summary_with_ai(study_material, api_key, persona, language):
+    # SILENT RETURN: No errors are thrown onto the UI if empty
     if not api_key:
         return None
 
@@ -319,10 +316,8 @@ def generate_summary_with_ai(study_material, api_key, persona, language):
                 contents=prompt
             )
             return response.text
-        except Exception as e:
-            if any(err in str(e).upper() for err in ["503", "429", "404", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "NOT_FOUND"]):
-                continue
-            return None
+        except Exception:
+            continue
     return None
 
 # --- APP FRONTEND ---
@@ -358,7 +353,7 @@ with st.sidebar:
     st.session_state.app_language = st.selectbox("Select Study Language:", ["English", "Tagalog / Filipino"])
         
     st.write("---")
-    st.subheader("🧙‍♂️ AI Content Engine")
+    st.subheader("🧙‍♂️ Content Engine")
     output_type = st.radio("What should the engine build?", ["Gamified Quiz Decks", "Clean Review Summaries"])
     
     if output_type == "Gamified Quiz Decks":
@@ -382,7 +377,7 @@ with st.sidebar:
         recorded_audio = st.file_uploader("Upload audio lesson clip:", type=["mp3", "wav", "m4a", "ogg"])
         if recorded_audio and st.button("🎙️ Process Lesson Audio Track", use_container_width=True):
             if not st.session_state.api_key:
-                st.warning("⚠️ Local Processing Limit: Transcribing new mic recordings requires a live API key and connection.")
+                st.warning("⚠️ Local Processing Limit: Transcribing recordings requires a live API key setup.")
             else:
                 with st.spinner("Transcribing lesson audio... 💬"):
                     try:
@@ -395,10 +390,8 @@ with st.sidebar:
                             try:
                                 tx_response = client.models.generate_content(model=model_option, contents=[audio_upload_res, tx_prompt])
                                 break
-                            except Exception as sub_err:
-                                if any(err in str(sub_err).upper() for err in ["503", "429", "404", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "NOT_FOUND"]):
-                                    continue
-                                raise sub_err
+                            except Exception:
+                                continue
                         
                         if tx_response:
                             study_text = tx_response.text
@@ -419,10 +412,10 @@ with st.sidebar:
     
     if triggered_generation and study_text.strip():
         if output_type == "Gamified Quiz Decks":
-            # ⚡ Try AI generation first
+            # Try to get remote AI content first
             ai_qs = generate_questions_with_ai(study_text, st.session_state.api_key, question_count, st.session_state.quiz_host_persona, st.session_state.app_language)
             
-            # ⚡ Fallback instantly to local builder if AI fails or key is missing
+            # If no key or server is down, immediately shift to local parser
             if not ai_qs:
                 st.toast("⚡ Operating in Offline Mode: Processing data using local engine.")
                 ai_qs = fallback_local_quiz_builder(study_text, question_count)
@@ -441,10 +434,10 @@ with st.sidebar:
                 st.session_state.hidden_options = []
                 st.rerun()
         else:
-            # ⚡ Try AI review generation first
+            # Try to get remote AI content first
             ai_notes = generate_summary_with_ai(study_text, st.session_state.api_key, st.session_state.quiz_host_persona, st.session_state.app_language)
             
-            # ⚡ Fallback instantly to local notes outline if AI fails or key is missing
+            # If no key or server is down, immediately shift to local parser
             if not ai_notes:
                 st.toast("⚡ Operating in Offline Mode: Rendering local summaries.")
                 ai_notes = fallback_local_notes_builder(study_text)
