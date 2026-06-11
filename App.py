@@ -1,7 +1,6 @@
 import json
 import re
 import random
-import base64
 import io
 import os
 import urllib.parse
@@ -12,62 +11,93 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
-# Safe fallbacks for optional document processing libraries
-try:
-    from pptx import Presentation
-except ImportError:
-    Presentation = None
+# --- THEME & PRESENTATION STYLING ---
+st.set_page_config(
+    page_title="BrainCrunch Gizmo", 
+    page_icon="🧠", 
+    layout="centered"
+)
 
-try:
-    import docx
-    from docx import Document
-except ImportError:
-    docx = None
-    Document = None
+# Custom premium stylesheet injection
+st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+    
+    /* Premium card modules styled like Gizmo AI */
+    .gizmo-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+        margin-bottom: 20px;
+    }
+    
+    .flashcard-inner {
+        background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+        color: white;
+        border-radius: 20px;
+        padding: 40px;
+        text-align: center;
+        min-height: 220px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        font-weight: 500;
+        box-shadow: 0 10px 15px -3px rgba(79, 70, 229, 0.3);
+    }
+    
+    /* Styled metric rows */
+    .metric-value {
+        font-size: 28px;
+        font-weight: 700;
+        color: #4f46e5;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
-# --- LOCAL STORAGE FILE PATH ---
 STORAGE_FILE = "storage.json"
 
 def load_local_storage():
-    """Loads saved quizzes and notes from the hard drive safely."""
     if os.path.exists(STORAGE_FILE):
         try:
             with open(STORAGE_FILE, "r", encoding="utf-8") as f:
                 content = f.read().strip()
-                if not content:
-                    return {}
-                return json.loads(content)
+                return json.loads(content) if content else {}
         except Exception:
             return {}
     return {}
 
 def save_local_storage(data):
-    """Saves binders permanently to the hard drive for offline access."""
     try:
         with open(STORAGE_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
     except Exception as e:
-        st.error(f"Failed to write to local storage: {e}")
+        st.error(f"Storage Error: {e}")
 
-# --- PAGE CONFIGURATION ---
-st.set_page_config(
-    page_title="BrainCrunch Game Arena", 
-    page_icon="🎮", 
-    layout="centered"
-)
-
-# --- PYDANTIC BLUEPRINT MODELS ---
+# --- PYDANTIC SCHEMA SPECIFICATION ---
 class QuizQuestion(BaseModel):
     question: str
     options: list[str]
     correct: str
     explanation: str
 
-# --- INITIALIZE STATE VARIABLES ---
+class FlashcardItem(BaseModel):
+    concept_or_term: str
+    definition_or_context: str
+
+# --- STATE LIFECYCLE ---
 if "api_key" not in st.session_state:
     st.session_state.api_key = ""
 if "questions" not in st.session_state:
     st.session_state.questions = []
+if "flashcards" not in st.session_state:
+    st.session_state.flashcards = []
 if "review_notes" not in st.session_state:
     st.session_state.review_notes = ""
 if "active_mode" not in st.session_state:
@@ -76,57 +106,26 @@ if "current_index" not in st.session_state:
     st.session_state.current_index = 0
 if "score" not in st.session_state:
     st.session_state.score = 0
-if "correct_answers_count" not in st.session_state:
-    st.session_state.correct_answers_count = 0
 if "answered" not in st.session_state:
     st.session_state.answered = False
 if "selected_option" not in st.session_state:
     st.session_state.selected_option = None
-if "streak" not in st.session_state:
-    st.session_state.streak = 0
-if "max_streak" not in st.session_state:
-    st.session_state.max_streak = 0
-if "leaderboard" not in st.session_state:
-    st.session_state.leaderboard = []
+if "reveal_card" not in st.session_state:
+    st.session_state.reveal_card = False
 if "quiz_host_persona" not in st.session_state:
     st.session_state.quiz_host_persona = "Enthusiastic School Teacher"
-if "app_language" not in st.session_state:
-    st.session_state.app_language = "English"
 
-# Initialize binders directly from local hard drive storage file
 if "nested_folders" not in st.session_state:
     st.session_state.nested_folders = load_local_storage()
 
-# Student Lifeline Tracking Configurations
-if "lifeline_5050_used" not in st.session_state:
-    st.session_state.lifeline_5050_used = False
-if "lifeline_hint_used" not in st.session_state:
-    st.session_state.lifeline_hint_used = False
-if "hidden_options" not in st.session_state:
-    st.session_state.hidden_options = []
-
-# AUTOMATIC SECRET API KEY CHECK WITH ATTRIBUTE FALLBACK PROTECTION
+# Attempt to look up secrets block silently
 try:
     if hasattr(st, "secrets") and "gemini" in st.secrets:
         st.session_state.api_key = st.secrets["gemini"]["api_key"]
 except Exception:
     pass
 
-# --- SFX AUDIO INJECTION ---
-def play_sfx(audio_url):
-    st.components.v1.html(
-        f"""
-        <audio autoplay style="display:none;">
-            <source src="{audio_url}" type="audio/mp3">
-        </audio>
-        """,
-        height=0,
-    )
-
-CORRECT_SFX = "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg"
-WRONG_SFX = "https://actions.google.com/sounds/v1/cartoon/slide_whistle_down.ogg"
-
-# --- FILE EXTRACTOR MECHANISM ---
+# --- FILE PARSING ENGINE ---
 def extract_text_from_file(file):
     filename = file.name.lower()
     text = ""
@@ -134,24 +133,12 @@ def extract_text_from_file(file):
         reader = PdfReader(file)
         for page in reader.pages:
             text += page.extract_text() or ""
-    elif filename.endswith(".pptx"):
-        if Presentation:
-            prs = Presentation(file)
-            for slide in prs.slides:
-                for shape in slide.shapes:
-                    if hasattr(shape, "text"):
-                        text += shape.text + "\n"
-    elif filename.endswith(".docx"):
-        if docx:
-            doc = docx.Document(file)
-            text += "\n".join([p.text for p in doc.paragraphs])
     elif filename.endswith(".txt"):
         text += file.read().decode("utf-8", errors="ignore")
     return text
 
 def get_youtube_id(url):
-    pattern = r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})'
-    match = re.search(pattern, url)
+    match = re.search(r'(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})', url)
     return match.group(1) if match else None
 
 def get_youtube_transcript(video_id):
@@ -161,520 +148,236 @@ def get_youtube_transcript(video_id):
     except Exception:
         return None
 
-# --- LOCAL NO-INTERNET/FALLBACK PARSERS ---
-def fallback_local_quiz_builder(text, num_questions):
-    """Generates an immediate review quiz locally from raw text strings when offline."""
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    valid_facts = []
-    
-    for s in sentences:
-        s_clean = s.strip().replace("\n", " ")
-        if len(s_clean) > 30 and any(marker in s_clean.lower() for marker in [" is ", " are ", " means ", " called ", " defined as "]):
-            valid_facts.append(s_clean)
-            
-    if len(valid_facts) < 3:
-        words = [w for w in text.split() if len(w) > 4]
-        if len(words) >= 10:
-            valid_facts = [f"Identify the context clues regarding standard operational definitions for: '{words[i]}'." for i in range(min(5, len(words)))]
-        else:
-            valid_facts = ["Review point: Check your uploaded documents details for core structural facts."]
-
-    mock_questions = []
-    sample_size = min(int(num_questions), len(valid_facts))
-    selected_facts = random.sample(valid_facts, sample_size) if len(valid_facts) >= sample_size else valid_facts
-
-    for i, fact in enumerate(selected_facts):
-        words = [w.strip(",.()\"") for w in fact.split() if len(w) > 4 and w.lower() not in ["which", "there", "their", "about", "under"]]
-        keyword = words[0] if words else "Concept"
-        
-        question_item = {
-            "question": f"Based on your uploaded study file, complete or identify the following entry: \"{fact}\"",
-            "options": [
-                f"A) Validated interpretation of {keyword}",
-                f"B) Alternative contextual variation",
-                f"C) Secondary related concept parameters",
-                f"D) Unrelated procedural variable entry"
-            ],
-            "correct": "A",
-            "explanation": "This question was constructed locally by your device's backup offline reader module."
-        }
-        mock_questions.append(question_item)
-        
-    return mock_questions
-
-def fallback_local_notes_builder(text):
-    """Processes clean, structured outline notes on machine without internet or keys."""
-    lines = text.split("\n")
-    cleaned_paragraphs = [l.strip() for l in lines if len(l.strip()) > 25]
-    
-    markdown_output = "### 📴 Local Offline Review Outline\n"
-    markdown_output += "*The application built this study guide locally on your machine without contacting servers.*\n\n"
-    
-    sections = min(8, len(cleaned_paragraphs))
-    if sections == 0:
-        return "### 📑 Empty Sheet\n\nNo structured paragraphs found inside your loaded text document."
-        
-    for i in range(sections):
-        para = cleaned_paragraphs[i]
-        words = para.split()
-        header_title = " ".join(words[:4]).upper() + "..."
-        markdown_output += f"#### 🔹 Summary Hub: {header_title}\n"
-        markdown_output += f"> {para}\n\n"
-        
-    return markdown_output
-
-# --- DOCX CONVERTER ENGINE ---
-def build_docx_bytes(markdown_text):
-    if not Document:
-        return None
-    doc = Document()
-    doc.add_heading("BrainCrunch Study Reviewer Sheet", level=1)
-    
-    clean_lines = markdown_text.split("\n")
-    for line in clean_lines:
-        if line.startswith("## "):
-            doc.add_heading(line.replace("## ", ""), level=2)
-        elif line.startswith("### "):
-            doc.add_heading(line.replace("### ", ""), level=3)
-        elif line.startswith("- ") or line.startswith("* "):
-            clean_bullet = line.replace("- ", "").replace("* ", "")
-            doc.add_paragraph(clean_bullet, style="List Bullet")
-        else:
-            if line.strip():
-                doc.add_paragraph(line)
-                
-    bio = io.BytesIO()
-    doc.save(bio)
-    return bio.getvalue()
-
-# --- DEEP AI CORE ENGINES (PRO -> FLASH FALLBACK WITH OVERLOAD PROTECTION) ---
-def generate_questions_with_ai(study_material, api_key, num_questions, persona, language):
-    # SILENT RETURN: No errors are thrown onto the UI if empty
-    if not api_key:
-        return None
-
-    lang_instruction = "All outputs must be written entirely in English."
-    if language == "Tagalog / Filipino":
-        lang_instruction = "CRITICAL: You are teaching a Filipino/Tagalog class. All questions, options, and explanations MUST be written in clear, natural Tagalog."
-
+# --- HIGH REASONING AI CORES ---
+def generate_questions_with_ai(study_material, num_questions, persona):
+    # Uses secure standard fallback string key if secrets are currently empty
+    key = st.session_state.api_key if st.session_state.api_key else "AI_KEY_FALLBACK"
     prompt = f"""
-    You are a smart game host playing with a student. Use this personality profile: "{persona}".
-    {lang_instruction}
+    You are an expert tutor modeling this specific personality profile: "{persona}".
+    TASK: Analyze the document and generate exactly {num_questions} unique multiple-choice questions.
     
-    TASK: Parse the provided text material thoroughly. Perform maximum deep information extraction—do not skip technical details, math variables, or niche terms. Create exactly {num_questions} high-quality multiple-choice questions.
-    
-    MATH RULE: If the question or options involve complex formulas, chemical equations, or mathematical expressions, format them cleanly using standard LaTeX notation (wrap with single '$' for inline math or double '$$' for large block equations) so they render beautifully on screen.
+    CRITICAL: Ensure options match the question content accurately. Each option must be descriptive and directly extracted from the real context of the material.
     
     Study Material:
     {study_material}
     """
-    
-    for target_model in ['gemini-2.5-flash', 'gemini-2.5-pro']:
-        try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model=target_model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=list[QuizQuestion],
-                ),
-            )
-            return json.loads(response.text)
-        except Exception:
-            continue
-    return None
-
-def generate_summary_with_ai(study_material, api_key, persona, language):
-    # SILENT RETURN: No errors are thrown onto the UI if empty
-    if not api_key:
+    try:
+        client = genai.Client(api_key=key)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=list[QuizQuestion],
+            ),
+        )
+        return json.loads(response.text)
+    except Exception as e:
+        st.error(f"AI Engine Error Connection Refused: {e}. Please add or verify your Gemini Key in Admin Mode.")
         return None
 
-    lang_instruction = "Write the summary sheet in English."
-    if language == "Tagalog / Filipino":
-        lang_instruction = "CRITICAL: Write the entire summary sheet in fluent Tagalog/Filipino language."
-
+def generate_flashcards_with_ai(study_material):
+    key = st.session_state.api_key if st.session_state.api_key else "AI_KEY_FALLBACK"
     prompt = f"""
-    You are an expert academic tutor with this personality profile: "{persona}".
-    {lang_instruction}
+    Extract major core terms, formulas, historical events, or core definitions from this text. 
+    Format them into a collection of structured flashcard pairs (Concept/Term vs Definition/Context).
     
-    TASK: Read the uploaded file text and perform an exhaustive deep information extraction. Pull out all definitions, key historical dates, core concepts, formulas, and laws. 
-    
-    FORMAT RULES:
-    - Organize using neat Markdown bullet points and bold headers.
-    - For mathematical formulas, equations, matrices, or variable fractions, use beautiful, readable standard LaTeX tags ($...$ or $$...$$). Make numbers and step-by-step math breakdowns perfectly organized.
-    
-    Study Material:
+    Text:
     {study_material}
     """
-    
-    for target_model in ['gemini-2.5-flash', 'gemini-2.5-pro']:
-        try:
-            client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model=target_model,
-                contents=prompt
-            )
-            return response.text
-        except Exception:
-            continue
-    return None
+    try:
+        client = genai.Client(api_key=key)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=list[FlashcardItem],
+            ),
+        )
+        return json.loads(response.text)
+    except Exception:
+        return None
 
-# --- APP FRONTEND ---
-st.markdown("<h1 style='text-align: center;'>🧠 BrainCrunch Studio Pro</h1>", unsafe_allow_html=True)
+# --- FRONTEND INTERFACE ---
+st.markdown("<h2 style='text-align: center; color: #1e293b; font-weight: 700;'>⚡ BrainCrunch Gizmo</h2>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; color: #64748b;'>An advanced adaptive learning arena for students</p>", unsafe_allow_html=True)
 
-# --- SIDEBAR CONTROL UNIT ---
 with st.sidebar:
-    st.header("⚙️ App Mode")
-    user_role = st.selectbox("I am a...", ["Player / Student", "Admin / Creator"])
+    st.markdown("### ⚙️ Workspace Configuration")
+    user_role = st.selectbox("Current Profile:", ["Player / Student", "Admin / Creator"])
     
     if user_role == "Admin / Creator":
-        st.write("---")
-        st.subheader("🔑 Admin Access")
-        admin_pass = st.text_input("Enter Admin Password:", type="password")
+        admin_pass = st.text_input("Admin Key Verification:", type="password")
         if admin_pass == "studio123":
-            st.success("Access Verified! 🛠️")
-            
-            st.markdown("### 🤫 Secret Admin Feature Hub")
-            st.session_state.api_key = st.text_input("System Gemini API Key:", value=st.session_state.api_key, type="password")
-            
-            st.subheader("🧙‍♂️ Game Host Persona")
+            st.success("Authorized Panel Unlocked")
+            st.session_state.api_key = st.text_input("Active Gemini API Key:", value=st.session_state.api_key, type="password")
             st.session_state.quiz_host_persona = st.selectbox(
-                "Choose AI Game Master:",
-                ["Enthusiastic School Teacher", "Sarcastic Pirate Coach", "Strict Drill Sergeant", "Whimsical Fantasy Wizard"]
+                "AI Voice Engine Persona:",
+                ["Enthusiastic School Teacher", "Strict Academic Coach", "Tech Tech Innovator"]
             )
-        elif admin_pass:
-            st.error("Incorrect Password!")
-
+            
     st.write("---")
-    st.header("🎮 Student Core Features")
-        
-    st.subheader("🌐 Language Filter")
-    st.session_state.app_language = st.selectbox("Select Study Language:", ["English", "Tagalog / Filipino"])
-        
-    st.write("---")
-    st.subheader("🧙‍♂️ Content Engine")
-    output_type = st.radio("What should the engine build?", ["Gamified Quiz Decks", "Clean Review Summaries"])
+    st.markdown("### 🧙‍♂️ Gizmo Mode Selector")
+    output_type = st.radio("Choose Study Mode:", ["Gizmo Flashcards AI", "Gamified Performance Quizzes"])
     
-    if output_type == "Gamified Quiz Decks":
-        question_count = st.number_input("How many questions?", min_value=1, max_value=150, value=5, step=5)
-    
+    if output_type == "Gamified Performance Quizzes":
+        question_count = st.number_input("Target Total Question Count:", min_value=5, max_value=50, value=5, step=5)
+        
     st.write("---")
-    input_mode = st.radio("Input Source:", ["Upload Files (PDF, PPTX, DOCX, TXT)", "Voice Lesson Record / Audio Note", "YouTube Video Link"])
+    input_mode = st.radio("Material Source:", ["Upload Files (PDF, TXT)", "YouTube Video Link"])
     
     study_text = ""
-    triggered_generation = False
+    run_generation = False
     
-    if input_mode == "Upload Files (PDF, PPTX, DOCX, TXT)":
-        uploaded_files = st.file_uploader("Drop slides or files:", type=["pdf", "pptx", "docx", "txt"], accept_multiple_files=True)
-        if uploaded_files and st.button("🚀 Process Study Material", use_container_width=True):
-            with st.spinner("Extracting text components... 📂"):
-                for f in uploaded_files:
-                    study_text += extract_text_from_file(f) + "\n"
-                triggered_generation = True
-
-    elif input_mode == "Voice Lesson Record / Audio Note":
-        recorded_audio = st.file_uploader("Upload audio lesson clip:", type=["mp3", "wav", "m4a", "ogg"])
-        if recorded_audio and st.button("🎙️ Process Lesson Audio Track", use_container_width=True):
-            if not st.session_state.api_key:
-                st.warning("⚠️ Local Processing Limit: Transcribing recordings requires a live API key setup.")
-            else:
-                with st.spinner("Transcribing lesson audio... 💬"):
-                    try:
-                        client = genai.Client(api_key=st.session_state.api_key)
-                        audio_upload_res = client.files.upload(file=recorded_audio, mime_type=recorded_audio.type)
-                        tx_prompt = "Transcribe the following lecture audio track exactly, keeping all numbers and core concepts sharp."
-                        
-                        tx_response = None
-                        for model_option in ["gemini-2.5-flash", "gemini-2.5-pro"]:
-                            try:
-                                tx_response = client.models.generate_content(model=model_option, contents=[audio_upload_res, tx_prompt])
-                                break
-                            except Exception:
-                                continue
-                        
-                        if tx_response:
-                            study_text = tx_response.text
-                            triggered_generation = True
-                    except Exception as audio_err:
-                        st.error(f"Audio processing failure checklist: {audio_err}")
-
+    if input_mode == "Upload Files (PDF, TXT)":
+        uploaded_files = st.file_uploader("Drop PDF or Text materials:", type=["pdf", "txt"], accept_multiple_files=True)
+        if uploaded_files and st.button("🚀 Synthesize Materials", use_container_width=True):
+            for f in uploaded_files:
+                study_text += extract_text_from_file(f) + "\n"
+            run_generation = True
+            
     elif input_mode == "YouTube Video Link":
-        yt_url = st.text_input("YouTube Video URL:")
-        if yt_url and st.button("🎬 Process Video Streams", use_container_width=True):
-            with st.spinner("Analyzing transcript... 🍿"):
-                v_id = get_youtube_id(yt_url)
-                if v_id:
-                    extracted_yt = get_youtube_transcript(v_id)
-                    if extracted_yt:
-                        study_text = extracted_yt
-                        triggered_generation = True
-    
-    if triggered_generation and study_text.strip():
-        if output_type == "Gamified Quiz Decks":
-            # Try to get remote AI content first
-            ai_qs = generate_questions_with_ai(study_text, st.session_state.api_key, question_count, st.session_state.quiz_host_persona, st.session_state.app_language)
-            
-            # If no key or server is down, immediately shift to local parser
-            if not ai_qs:
-                st.toast("⚡ Operating in Offline Mode: Processing data using local engine.")
-                ai_qs = fallback_local_quiz_builder(study_text, question_count)
-                
-            if ai_qs:
-                st.session_state.questions = ai_qs
-                st.session_state.active_mode = "Quiz"
-                st.session_state.current_index = 0
-                st.session_state.score = 0
-                st.session_state.correct_answers_count = 0
-                st.session_state.streak = 0
-                st.session_state.max_streak = 0
-                st.session_state.answered = False
-                st.session_state.lifeline_5050_used = False
-                st.session_state.lifeline_hint_used = False
-                st.session_state.hidden_options = []
-                st.rerun()
-        else:
-            # Try to get remote AI content first
-            ai_notes = generate_summary_with_ai(study_text, st.session_state.api_key, st.session_state.quiz_host_persona, st.session_state.app_language)
-            
-            # If no key or server is down, immediately shift to local parser
-            if not ai_notes:
-                st.toast("⚡ Operating in Offline Mode: Rendering local summaries.")
-                ai_notes = fallback_local_notes_builder(study_text)
-                
-            if ai_notes:
-                st.session_state.review_notes = ai_notes
-                st.session_state.active_mode = "Reviewer"
-                st.rerun()
+        yt_url = st.text_input("Paste YouTube URL:")
+        if yt_url and st.button("🚀 Transcribe & Synthesize", use_container_width=True):
+            vid = get_youtube_id(yt_url)
+            if vid:
+                study_text = get_youtube_transcript(vid)
+                run_generation = True
 
-    st.write("---")
-    st.subheader("📁 Save to Binders (Works Offline)")
-    path_input = st.text_input("Folder Path:", value="Q1 / Science / Biology")
-    if st.button("📂 File Current Data Into Path", use_container_width=True):
-        if st.session_state.active_mode == "Quiz" and st.session_state.questions:
-            st.session_state.nested_folders[path_input] = {"type": "Quiz", "data": list(st.session_state.questions)}
-            save_local_storage(st.session_state.nested_folders)
-            st.toast(f"Quiz saved to hard drive under: {path_input}!")
-            st.rerun()
-        elif st.session_state.active_mode == "Reviewer" and st.session_state.review_notes:
-            st.session_state.nested_folders[path_input] = {"type": "Reviewer", "data": st.session_state.review_notes}
-            save_local_storage(st.session_state.nested_folders)
-            st.toast(f"Summary Reviewer saved to hard drive under: {path_input}!")
-            st.rerun()
-
-    # STUDENT BINDER DROPDOWN
-    st.write("---")
-    st.header("🗂️ Study Binders (Works Offline)")
-    if st.session_state.nested_folders:
-        selected_path = st.selectbox("Choose a study track to open:", list(st.session_state.nested_folders.keys()))
-        if st.button("🎮 Load Selected Content", use_container_width=True):
-            saved_item = st.session_state.nested_folders[selected_path]
-            if saved_item["type"] == "Quiz":
-                st.session_state.questions = list(saved_item["data"])
-                st.session_state.active_mode = "Quiz"
-                st.session_state.current_index = 0
-                st.session_state.score = 0
-                st.session_state.correct_answers_count = 0
-                st.session_state.streak = 0
-                st.session_state.max_streak = 0
-                st.session_state.answered = False
-                st.session_state.lifeline_5050_used = False
-                st.session_state.lifeline_hint_used = False
-                st.session_state.hidden_options = []
+    if run_generation and study_text.strip():
+        with st.spinner("Processing documents with advanced AI stream models..."):
+            if output_type == "Gamified Performance Quizzes":
+                generated_qs = generate_questions_with_ai(study_text, question_count, st.session_state.quiz_host_persona)
+                if generated_qs:
+                    st.session_state.questions = generated_qs
+                    st.session_state.active_mode = "Quiz"
+                    st.session_state.current_index = 0
+                    st.session_state.score = 0
+                    st.session_state.answered = False
+                    st.rerun()
             else:
-                st.session_state.review_notes = saved_item["data"]
-                st.session_state.active_mode = "Reviewer"
+                cards = generate_flashcards_with_ai(study_text)
+                if cards:
+                    st.session_state.flashcards = cards
+                    st.session_state.active_mode = "Flashcards"
+                    st.session_state.current_index = 0
+                    st.session_state.reveal_card = False
+                    st.rerun()
+
+    st.write("---")
+    st.markdown("### 🗂️ Subject Cabinets")
+    if st.session_state.nested_folders:
+        active_track = st.selectbox("Saved Binders:", list(st.session_state.nested_folders.keys()))
+        if st.button("📥 Load Topic Content", use_container_width=True):
+            saved_meta = st.session_state.nested_folders[active_track]
+            if saved_meta["type"] == "Quiz":
+                st.session_state.questions = saved_meta["data"]
+                st.session_state.active_mode = "Quiz"
+            else:
+                st.session_state.flashcards = saved_meta["data"]
+                st.session_state.active_mode = "Flashcards"
+            st.session_state.current_index = 0
+            st.session_state.score = 0
+            st.session_state.answered = False
             st.rerun()
-    else:
-        st.caption("No custom subject tracks saved yet.")
 
-# --- MAIN RUNTIME ARENA ---
-
+# --- RUNTIME RENDER HOOKS ---
 if st.session_state.active_mode == "Welcome":
-    st.info("👋 **Welcome to the Game Arena!**\n\nUse the sidebar panel to generate flash quizzes, read summary sheets, or load saved topics out of your Study Binders folder cabinet tracker!")
+    st.markdown("""
+    <div class='gizmo-card' style='text-align: center; border-top: 4px solid #4f46e5;'>
+        <h3 style='color: #1e293b; margin-top:0;'>👋 Drop in your files to get started!</h3>
+        <p style='color: #64748b;'>Upload study materials or paste YouTube links in the left sidebar to automatically build custom Gizmo flashcards or diagnostic quizzes.</p>
+    </div>
+    """, unsafe_allow_html=True)
 
-elif st.session_state.active_mode == "Reviewer":
-    st.markdown("## 📑 Smart Summary Reviewer Sheet")
-    st.write("---")
-    st.markdown(st.session_state.review_notes)
-    st.write("---")
-    
-    # EXPORT HUB INTERFACE
-    st.markdown("### 📤 Student Export Hub")
-    st.caption("Copy this summary sheet directly to your computer clipboard or extract it into your word processing documents!")
-    
-    col_exp1, col_exp2 = st.columns(2)
-    with col_exp1:
-        st.text_area("📋 Copy to Clipboard Panel (Select All -> Copy):", value=st.session_state.review_notes, height=80)
+elif st.session_state.active_mode == "Flashcards":
+    idx = st.session_state.current_index
+    if idx < len(st.session_state.flashcards):
+        card = st.session_state.flashcards[idx]
         
-    with col_exp2:
-        if Document:
-            docx_data = build_docx_bytes(st.session_state.review_notes)
-            st.download_button(
-                label="📄 Export to Word File (.docx)",
-                data=docx_data,
-                file_name="BrainCrunch_Study_Sheet.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True
-            )
+        st.markdown(f"<p style='color:#64748b; font-weight:500; text-align:right;'>Card {idx+1} of {len(st.session_state.flashcards)}</p>", unsafe_allow_html=True)
+        
+        # Flashcard visual logic
+        if not st.session_state.reveal_card:
+            st.markdown(f"<div class='flashcard-inner'>{card['concept_or_term']}</div>", unsafe_allow_html=True)
         else:
-            st.download_button(
-                label="📝 Export to Plain Text (.txt)",
-                data=st.session_state.review_notes,
-                file_name="BrainCrunch_Study_Sheet.txt",
-                mime="text/plain",
-                use_container_width=True
-            )
-
-    st.write("---")
-    
-    # EXTERNAL DIRECTIONAL HUBS
-    st.markdown("### 🔍 Need a Video Explainer for This Lesson? (Requires Internet)")
-    try:
-        clean_topic_query = urllib.parse.quote(selected_path.replace("/", " "))
-    except Exception:
-        clean_topic_query = "study+lesson"
-        
-    yt_search_url = f"https://www.youtube.com/results?search_query={clean_topic_query}+lesson+explanation"
-    google_search_url = f"https://www.google.com/search?q={clean_topic_query}+educational+guide"
-    
-    col_nav1, col_nav2 = st.columns(2)
-    with col_nav1:
-        st.link_button("📺 Search Lessons on YouTube", yt_search_url, use_container_width=True)
-    with col_nav2:
-        st.link_button("🌐 Search Articles on Google", google_search_url, use_container_width=True)
-        
-    st.write("---")
-    if st.button("🏠 Back to Home Screen", key="back_home_rev", use_container_width=True):
-        st.session_state.active_mode = "Welcome"
-        st.rerun()
+            st.markdown(f"<div class='flashcard-inner' style='background:linear-gradient(135deg, #10b981 0%, #059669 100%);'>{card['definition_or_context']}</div>", unsafe_allow_html=True)
+            
+        st.write("")
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            if st.button("🔄 Flip Card", use_container_width=True):
+                st.session_state.reveal_card = not st.session_state.reveal_card
+                st.rerun()
+        with col_c2:
+            if st.button("➡️ Next Term", use_container_width=True):
+                st.session_state.current_index += 1
+                st.session_state.reveal_card = False
+                st.rerun()
+    else:
+        st.success("🎉 You have reviewed all the cards for this set!")
+        if st.button("🏠 Finish and Go Home", use_container_width=True):
+            st.session_state.active_mode = "Welcome"
+            st.rerun()
 
 elif st.session_state.active_mode == "Quiz":
     idx = st.session_state.current_index
     if idx < len(st.session_state.questions):
-        current_q = st.session_state.questions[idx]
+        q_item = st.session_state.questions[idx]
         
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.markdown(f"<h4 style='text-align:center;color:#ffaa00;'>🏆 Score</h4><p style='text-align:center;font-size:24px;font-weight:bold;'>{st.session_state.score}</p>", unsafe_allow_html=True)
-        with col2:
-            st.markdown(f"<h4 style='text-align:center;color:#ff5555;'>🔥 Streak</h4><p style='text-align:center;font-size:24px;font-weight:bold;'>{st.session_state.streak}</p>", unsafe_allow_html=True)
-        with col3:
-            st.markdown(f"<h4 style='text-align:center;color:#55afb5;'>🎯 Stage</h4><p style='text-align:center;font-size:24px;font-weight:bold;'>{idx + 1} / {len(st.session_state.questions)}</p>", unsafe_allow_html=True)
+        # Render clean dashboard headers
+        col_m1, col_m2 = st.columns(2)
+        with col_m1:
+            st.markdown(f"Score: <span class='metric-value'>{st.session_state.score}</span>", unsafe_allow_html=True)
+        with col_m2:
+            st.markdown(f"<p style='text-align:right; color:#64748b;'>Progress: <b>{idx+1}/{len(st.session_state.questions)}</b></p>", unsafe_allow_html=True)
             
         st.progress((idx) / len(st.session_state.questions))
         st.write("---")
         
-        # STUDENT LIFELINES HUB
-        if not st.session_state.answered:
-            st.markdown("##### 🆘 Student Lifelines")
-            col_life1, col_life2 = st.columns(2)
-            with col_life1:
-                if st.button("⚖️ Use 50/50", key=f"life_50_{idx}", disabled=st.session_state.lifeline_5050_used, use_container_width=True):
-                    st.session_state.lifeline_5050_used = True
-                    wrong_choices = [opt for opt in current_q['options'] if opt[0] != current_q['correct']]
-                    if wrong_choices:
-                        st.session_state.hidden_options = [random.choice(wrong_choices)]
-                    st.rerun()
-            with col_life2:
-                if st.button("💡 Ask AI Guide Clue", key=f"life_hint_{idx}", disabled=st.session_state.lifeline_hint_used, use_container_width=True):
-                    st.session_state.lifeline_hint_used = True
-                    st.session_state.show_hint_text = True
-            if "show_hint_text" in st.session_state and st.session_state.show_hint_text:
-                st.caption(f"🤖 *AI Companion Clue:* Look carefully at matching rules and definitions!")
-            st.write("---")
+        st.markdown(f"#### ❓ {q_item['question']}")
+        st.write("")
         
-        st.markdown(f"### ❓ {current_q['question']}")
-        
-        for option in current_q['options']:
-            if option in st.session_state.hidden_options:
-                continue 
+        for opt in q_item['options']:
             if not st.session_state.answered:
-                if st.button(option, key=f"btn_{idx}_{option}", use_container_width=True):
+                if st.button(opt, key=f"opt_{idx}_{opt}", use_container_width=True):
                     st.session_state.answered = True
-                    st.session_state.selected_option = option
+                    st.session_state.selected_option = opt
                     st.rerun()
                     
         if st.session_state.answered:
-            user_letter = st.session_state.selected_option[0]
-            correct_letter = current_q["correct"]
+            user_ans = st.session_state.selected_option[0]
+            target_ans = q_item['correct'][0]
             
-            if user_letter == correct_letter:
-                st.markdown(f"<div style='background-color:#d4edda; color:#155724; border-radius:10px; padding:15px; border-left:6px solid #28a745; margin-bottom:15px;'><h4 style='margin:0;'>🎉 EXCELLENT HIT!</h4><p style='margin:5px 0 0 0;'>You chose: <b>{st.session_state.selected_option}</b></p></div>", unsafe_allow_html=True)
-                if f"scored_{idx}" not in st.session_state:
-                    st.session_state.score += 10 + (st.session_state.streak * 2)
-                    st.session_state.streak += 1
-                    st.session_state.correct_answers_count += 1
-                    if st.session_state.streak > st.session_state.max_streak:
-                        st.session_state.max_streak = st.session_state.streak
-                    st.session_state[f"scored_{idx}"] = True
+            if user_ans == target_ans:
+                st.success(f"🎉 Correct choice: {st.session_state.selected_option}")
+                if f"calculated_{idx}" not in st.session_state:
+                    st.session_state.score += 10
+                    st.session_state[f"calculated_{idx}"] = True
             else:
-                st.markdown(f"<div style='background-color:#f8d7da; color:#721c24; border-radius:10px; padding:15px; border-left:6px solid #dc3545; margin-bottom:15px;'><h4 style='margin:0;'>💔 DEFLECTED</h4><p style='margin:5px 0 0 0;'>You chose <b>{user_letter}</b>. Correct path: <b>{correct_letter}</b>.</p></div>", unsafe_allow_html=True)
-                st.session_state.streak = 0
+                st.error(f"❌ Incorrect. You selected {user_ans}. Correct option was: {q_item['correct']}")
                 
-            st.markdown(f"**🧠 Memory Scoop ({st.session_state.quiz_host_persona}):**")
-            st.write(current_q['explanation'])
-            
-            # DYNAMIC REDIRECTION HUD
-            st.write("")
-            st.markdown("#### 📺 Confused About This Question? (Requires Internet)")
-            query_keywords = re.sub(r'[^\w\s]', '', current_q['question'])
-            encoded_query = urllib.parse.quote(query_keywords)
-            
-            question_yt_url = f"https://www.youtube.com/results?search_query={encoded_query}"
-            question_google_url = f"https://www.google.com/search?q={encoded_query}"
-            
-            col_qnav1, col_qnav2 = st.columns(2)
-            with col_qnav1:
-                st.link_button("📺 Watch Video Explainers", question_yt_url, use_container_width=True)
-            with col_qnav2:
-                st.link_button("🌐 Google Text Breakdowns", question_google_url, use_container_width=True)
-            
+            st.markdown(f"**ℹ️ Explanatory Summary:** {q_item['explanation']}")
             st.write("---")
-            if st.button("➡️ Advance to Next Level", use_container_width=True):
+            
+            if st.button("Advance to Next Concept ➡️", use_container_width=True):
                 st.session_state.current_index += 1
                 st.session_state.answered = False
                 st.session_state.selected_option = None
-                st.session_state.hidden_options = []
-                if "show_hint_text" in st.session_state:
-                    del st.session_state.show_hint_text
                 st.rerun()
     else:
-        st.success("🏆 **CAMP RUN COMPLETED!** 🏆")
-        st.subheader("📊 Performance Scorecard")
+        st.balloons()
+        st.markdown("<div class='gizmo-card' style='text-align:center;'><h3>🏆 Module Session Complete!</h3></div>", unsafe_allow_html=True)
+        st.metric("Final Performance Rating Score:", f"{st.session_state.score} Pts")
         
-        total_qs = len(st.session_state.questions)
-        accuracy_pct = int((st.session_state.correct_answers_count / total_qs) * 100) if total_qs > 0 else 0
-        
-        col_an1, col_an2, col_an3 = st.columns(3)
-        with col_an1:
-            st.metric(label="🎖️ Score", value=f"{st.session_state.score} pts")
-        with col_an2:
-            st.metric(label="🎯 Accuracy", value=f"{accuracy_pct}%")
-        with col_an3:
-            st.metric(label="🔥 Max Streak", value=f"{st.session_state.max_streak}")
+        # Save to Cabinet Path 
+        save_path = st.text_input("Enter Topic Label to save this deck to storage:", value="General Revision")
+        if st.button("💾 Save Session Deck", use_container_width=True):
+            st.session_state.nested_folders[save_path] = {"type": "Quiz", "data": st.session_state.questions}
+            save_local_storage(st.session_state.nested_folders)
+            st.toast("Saved successfully.")
             
-        player_name = st.text_input("Enter name for scoreboard matrix:", value="Player 1")
-        if st.button("💾 Log Score", use_container_width=True):
-            st.session_state.leaderboard.append({"name": player_name, "score": st.session_state.score, "accuracy": accuracy_pct})
-            st.toast("Score logged into local system matrix!")
-            st.rerun()
-            
-        if st.session_state.leaderboard:
-            st.write("### 🏁 Current Rankings")
-            sorted_board = sorted(st.session_state.leaderboard, key=lambda x: x['score'], reverse=True)
-            for place, entry in enumerate(sorted_board, 1):
-                st.write(f"**#{place}** {entry['name']} — `{entry['score']} pts` ({entry.get('accuracy', 0)}% Accuracy)")
-        
-        if st.button("🔄 Replay Session", use_container_width=True):
-            st.session_state.current_index = 0
-            st.session_state.score = 0
-            st.session_state.correct_answers_count = 0
-            st.session_state.streak = 0
-            st.session_state.max_streak = 0
-            st.session_state.answered = False
-            st.session_state.selected_option = None
-            st.session_state.lifeline_5050_used = False
-            st.session_state.lifeline_hint_used = False
-            st.session_state.hidden_options = []
+        if st.button("🏠 Finish and Return Home", use_container_width=True):
+            st.session_state.active_mode = "Welcome"
             st.rerun()
