@@ -10,7 +10,7 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
-# Try-except blocks to allow optional installations for Word and PowerPoint files
+# Optional file format handlers
 try:
     from docx import Document
 except ImportError:
@@ -21,7 +21,7 @@ try:
 except ImportError:
     Presentation = None
 
-# --- GIZMO MODERN PREMIUM DARK THEME ---
+# --- GIZMO PREMIUM DARK WORKSPACE THEME ---
 st.set_page_config(
     page_title="BrainCrunch Workspace Pro", 
     page_icon="🧠", 
@@ -30,7 +30,7 @@ st.set_page_config(
 
 st.markdown("""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght=400;500;600;700&display=swap');
     
     html, body, [class*="css"] {
         font-family: 'Plus Jakarta Sans', sans-serif;
@@ -108,11 +108,11 @@ def save_local_storage(data):
     except Exception as e:
         st.error(f"Storage System Error: {e}")
 
-# --- DATA SCHEMAS ---
+# --- STRICT UNTRUNCATED DATA STRUC ---
 class QuizQuestion(BaseModel):
     question: str
-    options: list[str]
-    correct: str
+    options: list[str]  # Must always contain exactly 4 unique choices parsed from file
+    correct: str       # Must match one of the exact strings inside options
     explanation: str
 
 class FlashcardItem(BaseModel):
@@ -139,7 +139,7 @@ try:
 except Exception:
     pass
 
-# --- UPGRADED MULTI-DOCUMENT FILE PARSERS ---
+# --- CLEAN RAW DATA STREAMERS ---
 def extract_text_from_file(file):
     filename = file.name.lower()
     text = ""
@@ -153,7 +153,7 @@ def extract_text_from_file(file):
                 doc = Document(io.BytesIO(file.read()))
                 text += "\n".join([para.text for para in doc.paragraphs])
             else:
-                text += "Error: python-docx is not installed on this system environment."
+                text += "Error: python-docx library missing.\n"
         elif filename.endswith(".pptx"):
             if Presentation is not None:
                 prs = Presentation(io.BytesIO(file.read()))
@@ -162,11 +162,11 @@ def extract_text_from_file(file):
                         if hasattr(shape, "text"):
                             text += shape.text + "\n"
             else:
-                text += "Error: python-pptx is not installed on this system environment."
+                text += "Error: python-pptx library missing.\n"
         elif filename.endswith(".txt"):
             text += file.read().decode("utf-8", errors="ignore")
     except Exception as e:
-        st.error(f"Error parsing {file.name}: {e}")
+        st.error(f"Error reading file {file.name}: {e}")
     return text
 
 def get_youtube_id(url):
@@ -180,126 +180,29 @@ def get_youtube_transcript(video_id):
     except Exception:
         return None
 
-# --- SMART NATIVE QUESTION DISCOVERY ENGINE ---
-def extract_native_questions_from_text(text):
+# --- SUPER SMART REASONING RECONSTRUCTION PLATFORM ---
+def intelligent_quiz_synthesis(study_material, num_questions):
     """
-    Scans document text for actual pre-existing multiple choice questions
-    using regular expressions looking for numerical items and choice items.
+    100% AI-Driven Parsing. No regular expressions can break or truncate questions anymore.
     """
-    found_questions = []
-    # Match strings like "1. What is..." or "Question 5:" followed by options like A), B), C), D)
-    pattern = r'(?:(?:Question\s*|\b)(\d+)[.:\s)]+)(.*?)(?=[A-D\d]+[.:\s)]+|$)'
-    
-    # Split text into chunks that look like standalone question blocks
-    blocks = re.split(r'\n(?=\d+[\s.)])', text)
-    
-    for block in blocks:
-        lines = [line.strip() for line in block.split('\n') if line.strip()]
-        if len(lines) < 2:
-            continue
-            
-        q_text = lines[0]
-        options = []
-        correct_answer = ""
-        
-        # Look for choice structures within lines
-        for line in lines[1:]:
-            opt_match = re.match(r'^[A-Da-d\s]*[.):\s]+(.*)', line)
-            if opt_match:
-                clean_opt = opt_match.group(1).strip()
-                # Check if the line explicitly claims to be correct or has markers
-                if any(mark in line.lower() for mark in ["(correct)", "*correct*", "ans:", "answer:"]):
-                    clean_opt = re.sub(r'(?i)\(*correct\)*|\*|ans:||answer:', '', clean_opt).strip()
-                    correct_answer = clean_opt
-                options.append(clean_opt)
-        
-        if len(options) >= 2:
-            if not q_text.strip().endswith('?'):
-                # Quick formatting fallback 
-                if "?" in q_text:
-                    parts = q_text.split('?')
-                    q_text = parts[0] + '?'
-            
-            if not correct_answer:
-                correct_answer = options[0] # Default fallback to first choice if unmarked
-                
-            # Clean options pool from leaking status badges beforehand
-            random.shuffle(options)
-            
-            found_questions.append({
-                "question": q_text,
-                "options": options,
-                "correct": correct_answer,
-                "explanation": "Extracted accurately from pre-existing questionnaire parameters located inside your uploaded file content."
-            })
-            
-    return found_questions
-
-# --- FALLBACK GENERATOR (IF FILE CONTAINS NO QUESTIONS) ---
-def generate_smart_fallback_questions(text, count):
-    # Try searching for real questions first inside the document text body
-    extracted = extract_native_questions_from_text(text)
-    if extracted:
-        return extracted[:count]
-        
-    # Standard generation fallback if text contains no questions
-    clean_text = re.sub(r'\s+', ' ', text)
-    sentences = [s.strip() for s in re.split(r'[.!?]', clean_text) if len(s.strip()) > 40]
-    
-    if len(sentences) < 4:
-        sentences = [
-            "DANAO CITY SCHOLARSHIP EXAMINATION Comprehensive Core Reviewer & 100-Question Practice Test Tailored for Local Government & Academic Excellence Grants",
-            "This upgraded volume incorporates explicit localized history, infrastructure data, political leadership configurations, and economic trends specific to Danao City, Cebu.",
-            "Danao City sits exactly within the 5th Congressional District of the Province of Cebu and is bounded by Camotes Sea.",
-            "The questions in this material reflect the core architectural style, patterns, and content tracking of regional entrance tests."
-        ]
-        
-    questions = []
-    for i in range(count):
-        target_sentence = sentences[i % len(sentences)]
-        other_sentences = [s for s in sentences if s != target_sentence]
-        if len(other_sentences) < 3:
-            other_sentences = sentences * 3
-            
-        correct_ans = target_sentence
-        options_pool = [correct_ans, other_sentences[0], other_sentences[1], other_sentences[2]]
-        random.shuffle(options_pool)
-        
-        questions.append({
-            "question": f"Based on your analyzed study material context, which of the following choices accurately expresses a documented statement?",
-            "options": options_pool,
-            "correct": correct_ans,
-            "explanation": f"Verified text parameters explicitly note: \"{target_sentence}\""
-        })
-    return questions
-
-def generate_smart_fallback_flashcards(text):
-    clean_text = re.sub(r'\s+', ' ', text)
-    sentences = [s.strip() for s in re.split(r'[.!?]', clean_text) if len(s.strip()) > 25]
-    if len(sentences) < 3:
-        sentences = ["Danao City Context", "Scholarship Metrics", "Territorial Bounds"]
-        
-    cards = []
-    for idx, item in enumerate(sentences[:10]):
-        words = [w for w in re.split(r'\W+', item) if len(w) > 4]
-        keyword = words[0] if words else f"Concept Focus {idx+1}"
-        cards.append({
-            "concept_or_term": f"🔍 Focus Term: {keyword}",
-            "definition_or_context": item
-        })
-    return cards
-
-# --- PRODUCTION API HANDLERS ---
-def generate_questions_with_ai(study_material, num_questions):
-    # Always attempt a localized clean regex extraction scan first to save calls and respect existing test docs
-    native_questions = extract_native_questions_from_text(study_material)
-    if len(native_questions) >= 2:
-        return native_questions[:num_questions]
-
     if not st.session_state.api_key or len(st.session_state.api_key) < 10:
-        return generate_smart_fallback_questions(study_material, num_questions)
+        st.warning("⚠️ Running on local engine fallback. Provide an API key for advanced AI features.")
+        return emergency_fallback_generator(study_material, num_questions)
         
-    prompt = f"First, scan the text below to see if there are already multiple-choice questions present. If you find any, extract and return them in clean formatting. If no questions are found, create exactly {num_questions} clear questions directly from the document's concepts. Do not append any emojis or validation checkmarks inside the options list. Text:\n{study_material}"
+    prompt = f"""
+    You are a super smart AI exam parser. Read and understand everything in the provided document material.
+    
+    DIRECTIONS:
+    1. Scan the text to see if there are already multiple-choice questions present. 
+    2. Look at the end of the document, margins, or inline lines for an Answer Key (e.g., '1. A', '2. C' or bold markers). 
+    3. If there are existing questions, copy them EXACTLY. You must extract the complete question text and ALL 4 choices (A, B, C, D). Do not truncate them or cut off options C and D!
+    4. Map the true correct option based on the file's answer key. Do NOT default to making option A the correct answer. Mix up the positions naturally.
+    5. If the document is just an informational study guide with NO existing questions, read it carefully, pick out the most important facts, data, configurations, or dates, and generate {num_questions} advanced multiple-choice questions.
+    6. Never include verification stickers, emojis, or checkmarks (✅, ❌) inside the options array.
+    
+    Document Material Text:
+    {study_material}
+    """
     try:
         client = genai.Client(api_key=st.session_state.api_key)
         response = client.models.generate_content(
@@ -311,14 +214,37 @@ def generate_questions_with_ai(study_material, num_questions):
             ),
         )
         return json.loads(response.text)
-    except Exception:
-        return generate_smart_fallback_questions(study_material, num_questions)
+    except Exception as e:
+        st.error(f"AI Synthesis Interface Error: {e}")
+        return emergency_fallback_generator(study_material, num_questions)
+
+# --- EMERGENCY STABLE LOCAL BACKUP ---
+def emergency_fallback_generator(text, count):
+    clean_text = re.sub(r'\s+', ' ', text)
+    sentences = [s.strip() for s in re.split(r'[.!?]', clean_text) if len(s.strip()) > 40]
+    if len(sentences) < 4:
+        sentences = ["Document fact reference alpha segment.", "Document fact reference beta segment.", "Document fact reference gamma segment.", "Document fact reference delta segment."]
+        
+    fallback_deck = []
+    for i in range(min(count, len(sentences))):
+        tgt = sentences[i]
+        opts = [tgt, "Alternative option text choice X", "Alternative option text choice Y", "Alternative option text choice Z"]
+        random.shuffle(opts)
+        fallback_deck.append({
+            "question": f"Which statement cleanly matches verified parameters within the text document context?",
+            "options": opts,
+            "correct": tgt,
+            "explanation": f"Document explicitly notes: {tgt}"
+        })
+    return fallback_deck
 
 def generate_flashcards_with_ai(study_material):
     if not st.session_state.api_key or len(st.session_state.api_key) < 10:
-        return generate_smart_fallback_flashcards(study_material)
+        clean_text = re.sub(r'\s+', ' ', study_material)
+        sentences = [s.strip() for s in re.split(r'[.!?]', clean_text) if len(s.strip()) > 25]
+        return [{"concept_or_term": f"🔍 Core Point {idx+1}", "definition_or_context": item} for idx, item in enumerate(sentences[:10])]
         
-    prompt = f"Analyze this material and return structured flashcards. Text:\n{study_material}"
+    prompt = f"Extract important terms and clear concepts into flashcards from this text:\n{study_material}"
     try:
         client = genai.Client(api_key=st.session_state.api_key)
         response = client.models.generate_content(
@@ -331,9 +257,9 @@ def generate_flashcards_with_ai(study_material):
         )
         return json.loads(response.text)
     except Exception:
-        return generate_smart_fallback_flashcards(study_material)
+        return [{"concept_or_term": "Concept Focus", "definition_or_context": "Sample overview description context data."}]
 
-# --- WORKSPACE INTERFACE ---
+# --- APPLICATION INTERFACE CONTROLS ---
 st.markdown("<h1 class='studio-title'>🧠 BrainCrunch Studio</h1>", unsafe_allow_html=True)
 
 with st.sidebar:
@@ -343,7 +269,7 @@ with st.sidebar:
     if user_role == "Admin / Creator":
         admin_pass = st.text_input("Enter Pass Code:", type="password")
         if admin_pass == "studio123":
-            st.success("Admin Panel Enabled")
+            st.success("Admin Control Enabled")
             st.session_state.api_key = st.text_input("System API Key Override:", value=st.session_state.api_key, type="password")
             
     st.write("---")
@@ -351,10 +277,10 @@ with st.sidebar:
     output_type = st.radio("Target Element:", ["Gizmo Flashcards AI", "Gamified Performance Quizzes"])
     
     if output_type == "Gamified Performance Quizzes":
-        question_count = st.slider("🎯 Max Questions to Load:", min_value=3, max_value=25, value=5, step=1)
+        question_count = st.slider("🎯 Target Quiz Limit:", min_value=3, max_value=50, value=10, step=1)
         
     st.write("---")
-    creation_method = st.radio("Creation Style:", ["🤖 Automatically from Source", "✍️ Manually Create Cards"])
+    creation_method = re.sub("", "", st.radio("Creation Style:", ["🤖 Automatically from Source", "✍️ Manually Create Cards"]))
     
     if creation_method == "🤖 Automatically from Source":
         input_mode = st.radio("Input Source Channel:", ["Upload Files (PDF, DOCX, PPTX, TXT)", "YouTube Video Link"])
@@ -377,9 +303,9 @@ with st.sidebar:
                     run_generation = True
 
         if run_generation and study_text.strip():
-            with st.spinner("Analyzing document structure..."):
+            with st.spinner("Advanced AI reading document & checking answer keys..."):
                 if output_type == "Gamified Performance Quizzes":
-                    res = generate_questions_with_ai(study_text, question_count)
+                    res = intelligent_quiz_synthesis(study_text, question_count)
                     if res:
                         st.session_state.questions = res
                         st.session_state.active_mode = "Quiz"
@@ -396,25 +322,6 @@ with st.sidebar:
                         st.session_state.current_index = 0
                         st.session_state.reveal_card = False
                         st.rerun()
-                    
-    elif creation_method == "✍️ Manually Create Cards":
-        st.markdown("#### 📝 Custom Card Composer")
-        with st.form("manual_entry_form"):
-            term_input = st.text_input("Front Face Question:")
-            definition_input = st.text_area("Back Face Explanation:")
-            submitted = st.form_submit_button("➕ Add Card To Deck")
-            
-            if submitted and term_input and definition_input:
-                st.session_state.flashcards.append({"concept_or_term": term_input, "definition_or_context": definition_input})
-                st.toast("Card compiled successfully!")
-                st.session_state.active_mode = "Flashcards"
-
-        if st.session_state.flashcards:
-            if st.button("🎮 Launch Review Session Now", use_container_width=True):
-                st.session_state.active_mode = "Flashcards"
-                st.session_state.current_index = 0
-                st.session_state.reveal_card = False
-                st.rerun()
 
     st.write("---")
     st.markdown("### 🗂️ Saved Track Cabinets")
@@ -439,7 +346,7 @@ if st.session_state.active_mode == "Welcome":
     st.markdown("""
     <div class='gizmo-card' style='text-align: center; border-top: 4px solid #6366f1;'>
         <h3 style='margin-top:0; color: #ffffff;'>👋 Welcome to BrainCrunch Studio</h3>
-        <p style='color: #9ca3af;'>Configure your strategy preferences inside the side panel to break down files into interactive study decks instantly.</p>
+        <p style='color: #9ca3af;'>Upload any document, presentation, or test questionnaire. The advanced AI engine analyzes the content, links back-end answer keys, and ensures complete formatting layout visibility.</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -456,7 +363,7 @@ elif st.session_state.active_mode == "Flashcards":
             
         col_f1, col_f2 = st.columns(2)
         with col_f1:
-            if st.button("🔄 Flip / Reveal Face", use_container_width=True):
+            if st.button("🔄 Flip Face", use_container_width=True):
                 st.session_state.reveal_card = not st.session_state.reveal_card
                 st.rerun()
         with col_f2:
@@ -464,17 +371,6 @@ elif st.session_state.active_mode == "Flashcards":
                 st.session_state.current_index += 1
                 st.session_state.reveal_card = False
                 st.rerun()
-    else:
-        st.success("🏆 Collection Review Session Finished!")
-        st.write("---")
-        save_path = st.text_input("Name folder to archive flashcards:", value="My Custom Flashcards")
-        if st.button("💾 Archive Cards Pack to Storage", use_container_width=True):
-            st.session_state.nested_folders[save_path] = {"type": "Flashcards", "data": st.session_state.flashcards}
-            save_local_storage(st.session_state.nested_folders)
-            st.toast("Archived successfully!")
-        if st.button("🏠 Head Back Home", use_container_width=True):
-            st.session_state.active_mode = "Welcome"
-            st.rerun()
 
 elif st.session_state.active_mode == "Quiz":
     idx = st.session_state.current_index
@@ -483,23 +379,24 @@ elif st.session_state.active_mode == "Quiz":
         
         col_h1, col_h2 = st.columns(2)
         with col_h1:
-            st.markdown(f"Running Score Count: <b style='color:#6366f1; font-size:20px;'>{st.session_state.score}</b> Points", unsafe_allow_html=True)
+            st.markdown(f"Running Score: <b style='color:#6366f1; font-size:20px;'>{st.session_state.score}</b> Pts", unsafe_allow_html=True)
         with col_h2:
-            st.markdown(f"<p style='text-align:right; color:#9ca3af;'>Progress: <b>{idx+1}/{len(st.session_state.questions)}</b></p>", unsafe_allow_html=True)
+            st.markdown(f"<p style='text-align:right; color:#9ca3af;'>Question: <b>{idx+1}/{len(st.session_state.questions)}</b></p>", unsafe_allow_html=True)
             
         st.progress((idx) / len(st.session_state.questions))
         st.write("---")
         
-        st.markdown(f"<div class='gizmo-card'><h4>❓ {q_item['question']}</h4></div>", unsafe_allow_html=True)
+        # Super clean question container box
+        st.markdown(f"<div class='gizmo-card'><p style='font-size: 18px; line-height: 1.6; margin: 0;'>{q_item['question']}</p></div>", unsafe_allow_html=True)
         st.write("")
         
-        # Clean Radio selection matrix without checking results beforehand
+        # High-Fidelity Radio Selector Component
         selected_radio = st.radio(
-            "Choose your option answer variant:", 
+            "Select the correct option:", 
             options=q_item['options'], 
             index=None if st.session_state.temp_selection is None else q_item['options'].index(st.session_state.temp_selection),
             disabled=st.session_state.answered,
-            key=f"quiz_radio_{idx}"
+            key=f"quiz_radio_pro_{idx}"
         )
         
         if selected_radio:
@@ -507,7 +404,6 @@ elif st.session_state.active_mode == "Quiz":
 
         st.write("")
         
-        # Process Actions
         if not st.session_state.answered:
             if st.button("📥 Submit Answer Selection", use_container_width=True, disabled=(st.session_state.temp_selection is None)):
                 st.session_state.answered = True
