@@ -105,9 +105,12 @@ if "lifeline_hint_used" not in st.session_state:
 if "hidden_options" not in st.session_state:
     st.session_state.hidden_options = []
 
-# AUTOMATIC SECRET API KEY CHECK 
-if "gemini" in st.secrets:
-    st.session_state.api_key = st.secrets["gemini"]["api_key"]
+# AUTOMATIC SECRET API KEY CHECK WITH ATTRIBUTE FALLBACK PROTECTION
+try:
+    if hasattr(st, "secrets") and "gemini" in st.secrets:
+        st.session_state.api_key = st.secrets["gemini"]["api_key"]
+except Exception:
+    pass
 
 # --- SFX AUDIO INJECTION ---
 def play_sfx(audio_url):
@@ -185,7 +188,7 @@ def build_docx_bytes(markdown_text):
 # --- DEEP AI CORE ENGINES (PRO -> FLASH FALLBACK WITH OVERLOAD PROTECTION) ---
 def generate_questions_with_ai(study_material, api_key, num_questions, persona, language):
     if not api_key:
-        st.error("🛑 Offline/Configuration Limit: Generating new questions requires an internet connection and an API key.")
+        st.error("🛑 Offline/Configuration Limit: Generating new questions requires an internet connection and an API key set up by the Administrator.")
         return None
 
     lang_instruction = "All outputs must be written entirely in English."
@@ -204,6 +207,7 @@ def generate_questions_with_ai(study_material, api_key, num_questions, persona, 
     {study_material}
     """
     
+    # FIXED: Enforced modern production strings exclusively to prevent 404 errors
     for target_model in ['gemini-2.5-flash', 'gemini-2.5-pro']:
         try:
             client = genai.Client(api_key=api_key)
@@ -217,7 +221,8 @@ def generate_questions_with_ai(study_material, api_key, num_questions, persona, 
             )
             return json.loads(response.text)
         except Exception as e:
-            if any(err in str(e).upper() for err in ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "LIMIT"]):
+            # Catch 503, 404, or 429 and dynamically try the next available model
+            if any(err in str(e).upper() for err in ["503", "429", "404", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "NOT_FOUND"]):
                 continue
             st.error(f"🛑 AI System Error: {e}")
             return None
@@ -227,7 +232,7 @@ def generate_questions_with_ai(study_material, api_key, num_questions, persona, 
 
 def generate_summary_with_ai(study_material, api_key, persona, language):
     if not api_key:
-        st.error("🛑 Offline/Configuration Limit: Generating new notes requires an internet connection and an API key.")
+        st.error("🛑 Offline/Configuration Limit: Generating new notes requires an internet connection and an API key set up by the Administrator.")
         return None
 
     lang_instruction = "Write the summary sheet in English."
@@ -248,6 +253,7 @@ def generate_summary_with_ai(study_material, api_key, persona, language):
     {study_material}
     """
     
+    # FIXED: Enforced modern production strings exclusively to prevent 404 errors
     for target_model in ['gemini-2.5-flash', 'gemini-2.5-pro']:
         try:
             client = genai.Client(api_key=api_key)
@@ -257,7 +263,7 @@ def generate_summary_with_ai(study_material, api_key, persona, language):
             )
             return response.text
         except Exception as e:
-            if any(err in str(e).upper() for err in ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "LIMIT"]):
+            if any(err in str(e).upper() for err in ["503", "429", "404", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "NOT_FOUND"]):
                 continue
             st.error(f"🛑 AI Summary Error: {e}")
             return None
@@ -322,7 +328,7 @@ with st.sidebar:
         recorded_audio = st.file_uploader("Upload audio lesson clip:", type=["mp3", "wav", "m4a", "ogg"])
         if recorded_audio and st.button("🎙️ Process Lesson Audio Track", use_container_width=True):
             if not st.session_state.api_key:
-                st.error("🛑 API Key missing. Please make sure the Admin has provided a valid Gemini API Key configuration setup.")
+                st.error("🛑 API Key missing. Please make sure the Admin has entered a valid Gemini API Key in the panel.")
             else:
                 with st.spinner("Transcribing lesson audio... 💬"):
                     try:
@@ -330,14 +336,14 @@ with st.sidebar:
                         audio_upload_res = client.files.upload(file=recorded_audio, mime_type=recorded_audio.type)
                         tx_prompt = "Transcribe the following lecture audio track exactly, keeping all numbers and core concepts sharp."
                         
-                        # Added structured model fallbacks for audio transcription process
                         tx_response = None
+                        # FIXED: Removed legacy gemini-1.5 strings to completely prevent 404 crashes
                         for model_option in ["gemini-2.5-flash", "gemini-2.5-pro"]:
                             try:
                                 tx_response = client.models.generate_content(model=model_option, contents=[audio_upload_res, tx_prompt])
                                 break
                             except Exception as sub_err:
-                                if any(err in str(sub_err).upper() for err in ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED"]):
+                                if any(err in str(sub_err).upper() for err in ["503", "429", "404", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "NOT_FOUND"]):
                                     continue
                                 raise sub_err
                         
