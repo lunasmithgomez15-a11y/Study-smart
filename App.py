@@ -29,11 +29,14 @@ except ImportError:
 STORAGE_FILE = "storage.json"
 
 def load_local_storage():
-    """Loads saved quizzes and notes from the hard drive."""
+    """Loads saved quizzes and notes from the hard drive safely."""
     if os.path.exists(STORAGE_FILE):
         try:
             with open(STORAGE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+                content = f.read().strip()
+                if not content:
+                    return {}
+                return json.loads(content)
         except Exception:
             return {}
     return {}
@@ -318,16 +321,33 @@ with st.sidebar:
     elif input_mode == "Voice Lesson Record / Audio Note":
         recorded_audio = st.file_uploader("Upload audio lesson clip:", type=["mp3", "wav", "m4a", "ogg"])
         if recorded_audio and st.button("🎙️ Process Lesson Audio Track", use_container_width=True):
-            with st.spinner("Transcribing lesson audio... 💬"):
-                try:
-                    client = genai.Client(api_key=st.session_state.api_key)
-                    audio_upload_res = client.files.upload(file=recorded_audio, mime_type=recorded_audio.type)
-                    tx_prompt = "Transcribe the following lecture audio track exactly, keeping all numbers and core concepts sharp."
-                    tx_response = client.models.generate_content(model="gemini-2.5-flash", contents=[audio_upload_res, tx_prompt])
-                    study_text = tx_response.text
-                    triggered_generation = True
-                except Exception as audio_err:
-                    st.error(f"Audio processing failure checklist: {audio_err}")
+            if not st.session_state.api_key:
+                st.error("🛑 API Key missing. Please make sure the Admin has provided a valid Gemini API Key configuration setup.")
+            else:
+                with st.spinner("Transcribing lesson audio... 💬"):
+                    try:
+                        client = genai.Client(api_key=st.session_state.api_key)
+                        audio_upload_res = client.files.upload(file=recorded_audio, mime_type=recorded_audio.type)
+                        tx_prompt = "Transcribe the following lecture audio track exactly, keeping all numbers and core concepts sharp."
+                        
+                        # Added structured model fallbacks for audio transcription process
+                        tx_response = None
+                        for model_option in ["gemini-2.5-flash", "gemini-2.5-pro"]:
+                            try:
+                                tx_response = client.models.generate_content(model=model_option, contents=[audio_upload_res, tx_prompt])
+                                break
+                            except Exception as sub_err:
+                                if any(err in str(sub_err).upper() for err in ["503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED"]):
+                                    continue
+                                raise sub_err
+                        
+                        if tx_response:
+                            study_text = tx_response.text
+                            triggered_generation = True
+                        else:
+                            st.error("⏳ Audio engine is currently overwhelmed. Please wait a moment and try again.")
+                    except Exception as audio_err:
+                        st.error(f"Audio processing failure checklist: {audio_err}")
 
     elif input_mode == "YouTube Video Link":
         yt_url = st.text_input("YouTube Video URL:")
